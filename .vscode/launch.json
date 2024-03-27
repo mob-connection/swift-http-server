@@ -1,0 +1,28 @@
+{
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "sourceLanguages": [
+                "swift"
+            ],
+            "name": "Debug HTTPServer",
+            "program": "${workspaceFolder:swift-http-server}/.build/debug/HTTPServer",
+            "args": [],
+            "cwd": "${workspaceFolder:swift-http-server}",
+            "preLaunchTask": "swift: Build Debug HTTPServer"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "sourceLanguages": [
+                "swift"
+            ],
+            "name": "Release HTTPServer",
+            "program": "${workspaceFolder:swift-http-server}/.build/release/HTTPServer",
+            "args": [],
+            "cwd": "${workspaceFolder:swift-http-server}",
+            "preLaunchTask": "swift: Build Release HTTPServer"
+        }
+    ]
+}
