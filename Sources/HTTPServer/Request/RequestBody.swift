@@ -167,7 +167,7 @@ extension RequestBody {
             self.source.finish()
         }
 
-        /// Finished the inbound stream.
+        /// Finished the inbound stream with an error.
         ///
         /// - Parameter error: The error to throw
         @inlinable
