@@ -306,6 +306,6 @@ extension NIOTSListenerBootstrap: ServerBootstrapProtocol {
 
 extension Server: CustomStringConvertible {
     public nonisolated var description: String {
-        "Hummingbird"
+        "Swift Server"
     }
 }
