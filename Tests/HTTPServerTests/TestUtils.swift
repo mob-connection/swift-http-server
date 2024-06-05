@@ -82,21 +82,70 @@ struct TestClient {
 }
 
 /// Helper function for testing a server
-public func testServer<ChildChannel: ServerChildChannel, Value: Sendable>(
+func testServer<Value: Sendable>(
     responder: @escaping HTTPChannelHandler.Responder,
-    httpChannelSetup: HTTPChannelBuilder<ChildChannel>,
+    serverBuilder: HTTPServerBuilder = .http1(),
     configuration: ServerConfiguration,
     eventLoopGroup: EventLoopGroup,
+    clientConfiguration: TestClient.Configuration = .init(),
     logger: Logger,
-    _ test: @escaping @Sendable (Server<ChildChannel>, Int) async throws -> Value
+    _ test: @escaping @Sendable (TestClient) async throws -> Value
 ) async throws -> Value {
     try await withThrowingTaskGroup(of: Void.self) { group in
         let (stream, continuation) = AsyncStream<Int>.makeStream()
-        let server = try Server(
-            childChannelSetup: httpChannelSetup.build(responder),
-            configuration: configuration,
-            onServerRunning: { continuation.yield($0.localAddress!.port!) },
-            eventLoopGroup: eventLoopGroup,
+        let server = try serverBuilder.buildServer(
+            configuration: configuration, 
+            eventLoopGroup: eventLoopGroup, 
+            logger: logger, 
+            responder: responder, 
+            onServerRunning: { continuation.yield($0.localAddress!.port!) }
+        )
+        let serviceGroup = ServiceGroup(
+            configuration: .init(
+                services: [server],
+                gracefulShutdownSignals: [.sigterm, .sigint],
+                logger: logger
+            )
+        )
+        group.addTask {
+            try await serviceGroup.run()
+        }
+        let port = await stream.first(where: { _ in true })!
+        let client = TestClient(
+            host: "localhost",
+            port: port,
+            configuration: clientConfiguration
+        )
+        do {
+            let value = try await test(client)
+            try await client.shutdown()
+            await serviceGroup.triggerGracefulShutdown()
+            return value
+        } catch {
+            try await client.shutdown()
+            await serviceGroup.triggerGracefulShutdown()
+            throw error
+        }
+    }
+}
+
+/// Helper function for testing a HTTP1 server which takes a closure that includes the server
+/// as a parameter
+func testHTTP1Server<Value: Sendable>(
+    responder: @escaping HTTPChannelHandler.Responder,
+    configuration: ServerConfiguration,
+    eventLoopGroup: EventLoopGroup,
+    clientConfiguration: TestClient.Configuration = .init(),
+    logger: Logger,
+    _ test: @escaping @Sendable (Server<HTTP1Channel>, TestClient) async throws -> Value
+) async throws -> Value {
+    try await withThrowingTaskGroup(of: Void.self) { group in
+        let (stream, continuation) = AsyncStream<Int>.makeStream()
+        let server = Server<HTTP1Channel>(
+            childChannelSetup: HTTP1Channel(responder: responder), 
+            configuration: configuration, 
+            onServerRunning: { continuation.yield($0.localAddress!.port!) }, 
+            eventLoopGroup: eventLoopGroup, 
             logger: logger
         )
         let serviceGroup = ServiceGroup(
@@ -110,9 +159,21 @@ public func testServer<ChildChannel: ServerChildChannel, Value: Sendable>(
             try await serviceGroup.run()
         }
         let port = await stream.first(where: { _ in true })!
-        let value = try await test(server, port)
-        await serviceGroup.triggerGracefulShutdown()
-        return value
+        let client = TestClient(
+            host: "localhost",
+            port: port,
+            configuration: clientConfiguration
+        )
+        do {
+            let value = try await test(server, client)
+            try await client.shutdown()
+            await serviceGroup.triggerGracefulShutdown()
+            return value
+        } catch {
+            try await client.shutdown()
+            await serviceGroup.triggerGracefulShutdown()
+            throw error
+        }
     }
 }
 
@@ -120,53 +181,32 @@ public func testServer<ChildChannel: ServerChildChannel, Value: Sendable>(
 ///
 /// Creates test client, runs test function abd ensures everything is
 /// shutdown correctly
-func testServer<ChildChannel: ServerChildChannel, Value: Sendable>(
+/*func testServer<Value: Sendable>(
     responder: @escaping HTTPChannelHandler.Responder,
-    httpChannelSetup: HTTPChannelBuilder<ChildChannel>,
-    configuration: ServerConfiguration,
-    eventLoopGroup: EventLoopGroup,
-    logger: Logger,
-    clientConfiguration: TestClient.Configuration = .init(),
-    _ test: @escaping @Sendable (Server<ChildChannel>, TestClient) async throws -> Value
-) async throws -> Value {
-    try await testServer(
-        responder: responder,
-        httpChannelSetup: httpChannelSetup,
-        configuration: configuration,
-        eventLoopGroup: eventLoopGroup,
-        logger: logger
-    ) { (server: Server<ChildChannel>, port: Int) in
-        let client = TestClient(
-            host: "localhost",
-            port: port,
-            configuration: clientConfiguration
-        )
-        let value = try await test(server, client)
-        try await client.shutdown()
-        return value
-    }
-}
-
-func testServer<Value: Sendable>(
-    responder: @escaping HTTPChannelHandler.Responder,
-    httpChannelSetup: HTTPChannelBuilder<some ServerChildChannel> = .http1(),
+    serverBuilder: HTTPServerBuilder = .http1(),
     configuration: ServerConfiguration,
     eventLoopGroup: EventLoopGroup,
     logger: Logger,
     clientConfiguration: TestClient.Configuration = .init(),
     _ test: @escaping @Sendable (TestClient) async throws -> Value
 ) async throws -> Value {
-    try await testServer(
+    try await _testServer(
         responder: responder,
-        httpChannelSetup: httpChannelSetup,
+        serverBuilder: serverBuilder,
         configuration: configuration,
         eventLoopGroup: eventLoopGroup,
-        logger: logger,
-        clientConfiguration: clientConfiguration
-    ) { _, client in
-        try await test(client)
+        logger: logger
+    ) {  (server: any Service, port: Int) in
+        let client = TestClient(
+            host: "localhost",
+            port: port,
+            configuration: clientConfiguration
+        )
+        let value = try await test(client)
+        try await client.shutdown()
+        return value
     }
-}
+}*/
 
 /// Run process with a timeout
 /// - Parameters:

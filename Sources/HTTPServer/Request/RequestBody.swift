@@ -41,8 +41,10 @@ public struct RequestBody: Sendable, AsyncSequence {
         self.init(.byteBuffer(buffer))
     }
 
+    ///  Initialise ``RequestBody`` from AsyncSequence of ByteBuffers
+    /// - Parameter asyncSequence: AsyncSequence
     @inlinable
-    init<AS: AsyncSequence & Sendable>(asyncSequence: AS) where AS.Element == ByteBuffer {
+    public init<AS: AsyncSequence & Sendable>(asyncSequence: AS) where AS.Element == ByteBuffer {
         self.init(.stream(.init(asyncSequence)))
     }
 }
@@ -167,7 +169,7 @@ extension RequestBody {
             self.source.finish()
         }
 
-        /// Finished the inbound stream with an error.
+        /// Finished the inbound stream.
         ///
         /// - Parameter error: The error to throw
         @inlinable

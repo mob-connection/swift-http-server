@@ -21,7 +21,7 @@ import ServiceLifecycle
 
 /// Protocol for HTTP channels
 public protocol HTTPChannelHandler: ServerChildChannel {
-    typealias Responder = @Sendable (Request, Channel) async throws -> Response
+    typealias Responder = @Sendable (Request, Channel) async -> Response
     var responder: Responder { get }
 }
 
@@ -30,7 +30,6 @@ public protocol HTTPChannelHandler: ServerChildChannel {
 @usableFromInline
 enum HTTPChannelError: Error {
     case unexpectedHTTPPart(HTTPRequestPart)
-    case closeConnection
 }
 
 enum HTTPState: Int, Sendable {
@@ -61,12 +60,7 @@ extension HTTPChannelHandler {
 
                             let bodyStream = NIOAsyncChannelRequestBody(iterator: iterator)
                             let request = Request(head: head, body: .init(asyncSequence: bodyStream))
-                            let response: Response
-                            do {
-                                response = try await self.responder(request, asyncChannel.channel)
-                            } catch {
-                                response = self.getErrorResponse(from: error, allocator: asyncChannel.channel.allocator)
-                            }
+                            let response: Response = await self.responder(request, asyncChannel.channel)
                             do {
                                 try await outbound.write(.head(response.head))
                                 let tailHeaders = try await response.body.write(responseWriter)
@@ -75,7 +69,7 @@ extension HTTPChannelHandler {
                                 throw error
                             }
                             if request.headers[.connection] == "close" {
-                                throw HTTPChannelError.closeConnection
+                                return
                             }
                             // set to idle unless it is cancelled then exit
                             guard processingRequest.exchange(.idle) == .processing else { break }
@@ -112,25 +106,9 @@ extension HTTPChannelHandler {
             } onCancel: {
                 asyncChannel.channel.close(mode: .input, promise: nil)
             }
-        } catch HTTPChannelError.closeConnection {
-            // channel is being closed because we received a connection: close header
         } catch {
             // we got here because we failed to either read or write to the channel
             logger.trace("Failed to read/write to Channel. Error: \(error)")
-        }
-    }
-
-    func getErrorResponse(from error: Error, allocator: ByteBufferAllocator) -> Response {
-        switch error {
-        case let httpError as HTTPResponseError:
-            // this is a processed error so don't log as Error
-            return httpError.response(allocator: allocator)
-        default:
-            // this error has not been recognised
-            return Response(
-                status: .internalServerError,
-                body: .init()
-            )
         }
     }
 }
@@ -146,13 +124,6 @@ struct HTTPServerBodyWriter: Sendable, ResponseBodyWriter {
     func write(_ buffer: ByteBuffer) async throws {
         try await self.outbound.write(.body(buffer))
     }
-}
-
-// If we catch a too many bytes error report that as payload too large
-extension NIOTooManyBytesError: HTTPResponseError {
-    public var status: HTTPResponse.Status { .contentTooLarge }
-    public var headers: HTTPFields { [:] }
-    public func body(allocator: ByteBufferAllocator) -> ByteBuffer? { nil }
 }
 
 extension NIOLockedValueBox {

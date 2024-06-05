@@ -25,8 +25,10 @@ public struct Request: Sendable {
     /// Request HTTP path
     public var path: String { self.head.path ?? "/" }
     /// Request HTTP method
+    @inlinable
     public var method: HTTPRequest.Method { self.head.method }
     /// Request HTTP headers
+    @inlinable
     public var headers: HTTPFields { self.head.headerFields }
 
     // MARK: Initialization

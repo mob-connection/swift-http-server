@@ -42,7 +42,7 @@ class HTTPServerTests: XCTestCase {
     func testConnect() async throws {
         try await testServer(
             responder: helloResponder,
-            httpChannelSetup: .http1(),
+            serverBuilder: .http1(),
             configuration: .init(address: .hostname(port: 0)),
             eventLoopGroup: Self.eventLoopGroup,
             logger: Logger(label: "Hummingbird")
@@ -66,25 +66,15 @@ class HTTPServerTests: XCTestCase {
         }
     }
 
-    func testError() async throws {
-        try await testServer(
-            responder: { _, _ in throw HTTPError(.unauthorized) },
-            httpChannelSetup: .http1(),
-            configuration: .init(address: .hostname(port: 0)),
-            eventLoopGroup: Self.eventLoopGroup,
-            logger: Logger(label: "Hummingbird")
-        ) { client in
-            let response = try await client.get("/")
-            XCTAssertEqual(response.status, .unauthorized)
-            XCTAssertEqual(response.headers[.contentLength], "0")
-        }
-    }
-
     func testConsumeBody() async throws {
         try await testServer(
             responder: { request, _ in
-                let buffer = try await request.body.collect(upTo: .max)
-                return Response(status: .ok, body: .init(byteBuffer: buffer))
+                do {
+                    let buffer = try await request.body.collect(upTo: .max)
+                    return Response(status: .ok, body: .init(byteBuffer: buffer))
+                } catch {
+                    return Response(status: .contentTooLarge)
+                }
             },
             configuration: .init(address: .hostname(port: 0)),
             eventLoopGroup: Self.eventLoopGroup,
@@ -162,7 +152,7 @@ class HTTPServerTests: XCTestCase {
             responder: { request, _ in
                 return Response(status: .ok, body: .init(asyncSequence: request.body.delayed()))
             },
-            httpChannelSetup: .http1(additionalChannelHandlers: [SlowInputChannelHandler()]),
+            serverBuilder: .http1(additionalChannelHandlers: [SlowInputChannelHandler()]),
             configuration: .init(address: .hostname(port: 0)),
             eventLoopGroup: Self.eventLoopGroup,
             logger: Logger(label: "Hummingbird")
@@ -175,23 +165,30 @@ class HTTPServerTests: XCTestCase {
     }
 
     func testChannelHandlerErrorPropagation() async throws {
+        struct HandlerError: Error {}
         class CreateErrorHandler: ChannelInboundHandler, RemovableChannelHandler {
             typealias InboundIn = HTTPRequestPart
 
             var seen: Bool = false
             func channelRead(context: ChannelHandlerContext, data: NIOAny) {
                 if case .body = self.unwrapInboundIn(data) {
-                    context.fireErrorCaught(HTTPError(.unavailableForLegalReasons))
+                    context.fireErrorCaught(HandlerError())
                 }
                 context.fireChannelRead(data)
             }
         }
         try await testServer(
             responder: { request, _ in
-                _ = try await request.body.collect(upTo: .max)
-                return Response(status: .ok)
+                do {
+                    _ = try await request.body.collect(upTo: .max)
+                    return Response(status: .ok)
+                } catch is HandlerError {
+                    return Response(status: .unavailableForLegalReasons)
+                } catch {
+                    return Response(status: .contentTooLarge)
+                }
             },
-            httpChannelSetup: .http1(additionalChannelHandlers: [CreateErrorHandler()]),
+            serverBuilder: .http1(additionalChannelHandlers: [CreateErrorHandler()]),
             configuration: .init(address: .hostname(port: 0)),
             eventLoopGroup: Self.eventLoopGroup,
             logger: Logger(label: "Hummingbird")
@@ -220,22 +217,6 @@ class HTTPServerTests: XCTestCase {
         }
     }
 
-    /// test server closes connection if "connection" header is set to "close"
-    /*func testConnectionClose() async throws {
-        try await testServer(
-            responder: helloResponder,
-            configuration: .init(address: .hostname(port: 0)),
-            eventLoopGroup: Self.eventLoopGroup,
-            logger: Logger(label: "Hummingbird")
-        ) { client in
-            try await withTimeout(.seconds(5)) {
-                _ = try await client.get("/", headers: [.connection: "close"])
-                let channel = try await client.channelPromise.futureResult.get()
-                try await channel.closeFuture.get()
-            }
-        }
-    }*/
-
     func testReadIdleHandler() async throws {
         /// Channel Handler for serializing request header and data
         final class HTTPServerIncompleteRequest: ChannelInboundHandler, RemovableChannelHandler {
@@ -254,10 +235,14 @@ class HTTPServerTests: XCTestCase {
         }
         try await testServer(
             responder: { request, _ in
-                _ = try await request.body.collect(upTo: .max)
-                return .init(status: .ok)
+                do {
+                    _ = try await request.body.collect(upTo: .max)
+                    return .init(status: .ok)
+                } catch {
+                    return .init(status: .contentTooLarge)
+                }
             },
-            httpChannelSetup: .http1(additionalChannelHandlers: [HTTPServerIncompleteRequest(), IdleStateHandler(readTimeout: .seconds(1))]),
+            serverBuilder: .http1(additionalChannelHandlers: [HTTPServerIncompleteRequest(), IdleStateHandler(readTimeout: .seconds(1))]),
             configuration: .init(address: .hostname(port: 0)),
             eventLoopGroup: Self.eventLoopGroup,
             logger: Logger(label: "Hummingbird")
@@ -273,36 +258,19 @@ class HTTPServerTests: XCTestCase {
             }
         }
     }
-
-    /*func testWriteIdleTimeout() async throws {
-        try await testServer(
-            responder: { request, _ in
-                _ = try await request.body.collect(upTo: .max)
-                return .init(status: .ok)
-            },
-            httpChannelSetup: .http1(additionalChannelHandlers: [IdleStateHandler(writeTimeout: .seconds(1))]),
-            configuration: .init(address: .hostname(port: 0)),
-            eventLoopGroup: Self.eventLoopGroup,
-            logger: Logger(label: "Hummingbird")
-        ) { client in
-            try await withTimeout(.seconds(5)) {
-                _ = try await client.get("/", headers: [.connection: "keep-alive"])
-                let channel = try await client.channelPromise.futureResult.get()
-                try await channel.closeFuture.get()
-            }
-        }
-    }*/
-
     func testChildChannelGracefulShutdown() async throws {
         let (stream, continuation) = AsyncStream<Void>.makeStream()
 
-        try await testServer(
+        try await testHTTP1Server(
             responder: { request, _ in
                 continuation.yield()
-                try await Task.sleep(for: .milliseconds(500))
-                return Response(status: .ok, body: .init(asyncSequence: request.body.delayed()))
+                do {
+                    try await Task.sleep(for: .milliseconds(500))
+                    return Response(status: .ok, body: .init(asyncSequence: request.body.delayed()))
+                } catch {
+                    return Response(status: .serviceUnavailable)
+                }
             },
-            httpChannelSetup: .http1(),
             configuration: .init(address: .hostname(port: 0)),
             eventLoopGroup: Self.eventLoopGroup,
             logger: Logger(label: "Hummingbird")
@@ -326,12 +294,15 @@ class HTTPServerTests: XCTestCase {
     }
 
     func testIdleChildChannelGracefulShutdown() async throws {
-        try await testServer(
+        try await testHTTP1Server(
             responder: { request, _ in
-                try await Task.sleep(for: .milliseconds(500))
-                return Response(status: .ok, body: .init(asyncSequence: request.body.delayed()))
+                do {
+                    try await Task.sleep(for: .milliseconds(500))
+                    return Response(status: .ok, body: .init(asyncSequence: request.body.delayed()))
+                } catch {
+                    return Response(status: .serviceUnavailable)
+                }
             },
-            httpChannelSetup: .http1(),
             configuration: .init(address: .hostname(port: 0)),
             eventLoopGroup: Self.eventLoopGroup,
             logger: Logger(label: "Hummingbird")

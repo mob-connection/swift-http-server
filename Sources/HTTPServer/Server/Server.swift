@@ -69,12 +69,15 @@ public actor Server<ChildChannel: ServerChildChannel>: Service {
 
     /// Initialize Server
     /// - Parameters:
-    ///   - group: EventLoopGroup server uses
+    ///   - childChannelSetup: Server child channel
     ///   - configuration: Configuration for server
+    ///   - onServerRunning: Closure to run once server is up and running
+    ///   - eventLoopGroup: EventLoopGroup the server uses
+    ///   - logger: Logger used by server
     public init(
         childChannelSetup: ChildChannel,
         configuration: ServerConfiguration,
-        onServerRunning: (@Sendable (Channel) async -> Void)? = { _ in },
+        onServerRunning: (@Sendable (Channel) async -> Void)? = nil,
         eventLoopGroup: EventLoopGroup,
         logger: Logger
     ) {
@@ -209,7 +212,7 @@ public actor Server<ChildChannel: ServerChildChannel>: Service {
                         logger: self.logger
                     )
                 }
-                self.logger.info("Server started and listening on \(host):\(port)")
+                self.logger.info("Server started and listening on \(host):\(asyncChannel.channel.localAddress?.port ?? port)")
                 return asyncChannel
 
             case .unixDomainSocket(let path):
@@ -241,7 +244,6 @@ public actor Server<ChildChannel: ServerChildChannel>: Service {
             .serverChannelOption(ChannelOptions.backlog, value: numericCast(configuration.backlog))
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: configuration.reuseAddress ? 1 : 0)
             .childChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: configuration.reuseAddress ? 1 : 0)
-            .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 1)
             .childChannelOption(ChannelOptions.allowRemoteHalfClosure, value: true)
     }
 

@@ -27,7 +27,7 @@ public struct HTTP1Channel: ServerChildChannel, HTTPChannelHandler {
     ///   - responder: Function returning a HTTP response for a HTTP request
     ///   - additionalChannelHandlers: Additional channel handlers to add to channel pipeline
     public init(
-        responder: @escaping @Sendable (Request, Channel) async throws -> Response,
+        responder: @escaping HTTPChannelHandler.Responder,
         additionalChannelHandlers: @escaping @Sendable () -> [any RemovableChannelHandler] = { [] }
     ) {
         self.additionalChannelHandlers = additionalChannelHandlers
@@ -46,8 +46,9 @@ public struct HTTP1Channel: ServerChildChannel, HTTPChannelHandler {
             [HTTPUserEventHandler(logger: logger)]
         return channel.eventLoop.makeCompletedFuture {
             try channel.pipeline.syncOperations.configureHTTPServerPipeline(
-                withPipeliningAssistance: false,
-                withErrorHandling: true
+                withPipeliningAssistance: false, // HTTP is pipelined by NIOAsyncChannel
+                withErrorHandling: true,
+                withOutboundHeaderValidation: false // Swift HTTP Types are already doing this validation
             )
             try channel.pipeline.syncOperations.addHandlers(childChannelHandlers)
             return try NIOAsyncChannel(
@@ -65,6 +66,13 @@ public struct HTTP1Channel: ServerChildChannel, HTTPChannelHandler {
         await handleHTTP(asyncChannel: asyncChannel, logger: logger)
     }
 
-    public let responder: @Sendable (Request, Channel) async throws -> Response
+    public let responder: HTTPChannelHandler.Responder
     let additionalChannelHandlers: @Sendable () -> [any RemovableChannelHandler]
 }
+
+/// Extend NIOAsyncChannel to ServerChildChannelValue so it can be used in a ServerChildChannel
+#if hasFeature(RetroactiveAttribute)
+extension NIOAsyncChannel: @retroactive ServerChildChannelValue {}
+#else
+extension NIOAsyncChannel: ServerChildChannelValue {}
+#endif
