@@ -22,7 +22,7 @@ import NIOTransportServices
 #endif
 import ServiceLifecycle
 
-/// HTTP server class
+/// Server class
 public actor Server<ChildChannel: ServerChildChannel>: Service {
     public typealias AsyncChildChannel = ChildChannel.Value
     public typealias AsyncServerChannel = NIOAsyncChannel<AsyncChildChannel, Never>
