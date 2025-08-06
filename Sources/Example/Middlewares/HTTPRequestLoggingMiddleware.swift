@@ -36,8 +36,8 @@ where
     }
 
     func intercept(
-        input: Input,
-        next: (NextInput) async throws -> Void
+        input: inout Input,
+        next: (inout NextInput) async throws -> Void
     ) async throws {
         let request = input.0
         let requestAsyncReader = input.1
@@ -50,16 +50,15 @@ where
             base: requestAsyncReader,
             logger: self.logger
         )
-        try await next(
-            (request, wrappedReader, { httpResponse in
-                    let writer = try await respond(httpResponse)
-                    return HTTPResponseLoggingConcludingAsyncWriter(
-                        base: writer,
-                        logger: self.logger
-                    )
-                }
+        var tuple = (request, wrappedReader, { httpResponse in
+            let writer = try await respond(httpResponse)
+            return HTTPResponseLoggingConcludingAsyncWriter(
+                base: writer,
+                logger: self.logger
             )
+        }
         )
+        try await next(&tuple)
     }
 }
 

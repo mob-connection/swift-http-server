@@ -94,7 +94,8 @@ extension Server {
             logger: logger,
             configuration: configuration
         ) { request, requestReader, sendResponse in
-            try await chain.intercept(input: (request, requestReader, sendResponse)) { _ in }
+            var tuple = (request, requestReader, sendResponse)
+            try await chain.intercept(input: &tuple) { _ in }
         }
     }
 }

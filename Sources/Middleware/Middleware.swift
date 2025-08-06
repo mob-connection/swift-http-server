@@ -9,9 +9,9 @@
 ///
 /// - Note: Middleware components are designed to be composable. You can use the
 ///   `MiddlewareChainBuilder` to easily construct middleware chains.
-public protocol Middleware<Input, NextInput> {
+public protocol Middleware<Input, NextInput>: Sendable {
     /// The input type that this middleware accepts.
-    associatedtype Input
+    associatedtype Input: ~Copyable
 
     /// The type passed to the next middleware in the chain.
     /// Defaults to the same type as `Input` if not specified.
@@ -29,7 +29,7 @@ public protocol Middleware<Input, NextInput> {
     ///
     /// - Throws: Any error that occurs during processing.
     func intercept(
-        input: Input,
-        next: (NextInput) async throws -> Void
+        input: inout Input,
+        next: (inout NextInput) async throws -> Void
     ) async throws
 }

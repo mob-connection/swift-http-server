@@ -27,8 +27,8 @@ where
     }
 
     func intercept(
-        input: Input,
-        next: (NextInput) async throws -> Void
+        input: inout Input,
+        next: (inout NextInput) async throws -> Void
     ) async throws {
         try await input.2(HTTPResponse(status: .accepted)).produceAndConclude { responseBodyAsyncWriter in
             var responseBodyAsyncWriter = responseBodyAsyncWriter
