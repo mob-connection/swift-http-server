@@ -15,58 +15,45 @@ public import HTTPTypes
 
 /// A protocol that defines the contract for handling HTTP server requests.
 ///
-/// ``HTTPServerRequestHandler`` provides a structured way to process incoming HTTP requests and generate appropriate responses.
-/// Conforming types implement the ``handle(request:requestContext:requestBodyAndTrailers:responseSender:)`` method,
-/// which is called by the HTTP server for each incoming request. The handler is responsible for:
+/// ``HTTPServerRequestHandler`` provides a structured way to process incoming HTTP requests
+/// and generate appropriate responses. Conforming types implement the
+/// ``handle(request:requestContext:requestBodyAndTrailers:responseSender:)`` method, which is
+/// called by the HTTP server for each incoming request. The handler is responsible for reading
+/// the request body, processing the request, and sending a response.
 ///
-/// - Processing the request headers.
-/// - Reading the request body data using the provided `RequestReader`
-/// - Generating and sending an appropriate response using the response callback
-///
-/// This protocol fully supports bi-directional streaming HTTP request handling including the optional request and response trailers.
+/// This protocol fully supports bidirectional streaming HTTP request handling, including
+/// optional request and response trailers.
 ///
 /// # Example
 ///
 /// ```swift
-/// struct EchoHandler: HTTPServerRequestHandler {
-///   func handle(
-///     request: HTTPRequest,
-///     requestContext: HTTPRequestContext,
-///     requestConcludingAsyncReader: consuming sending HTTPRequestConcludingAsyncReader,
-///     responseSender: consuming sending HTTPResponseSender<HTTPResponseConcludingAsyncWriter>
-///   ) async throws {
-///     // Read the entire request body
-///     let (bodyData, trailers) = try await requestConcludingAsyncReader.consumeAndConclude { reader in
-///         var reader = reader
-///         var data = [UInt8]()
-///         var shouldContinue = true
-///         while shouldContinue {
-///             try await reader.read { span in
-///                 guard let span else {
-///                     shouldContinue = false
-///                     return
+/// struct EchoHandler<
+///     ConcludingRequestReader: ConcludingAsyncReader<RequestReader, HTTPFields?> & ~Copyable,
+///     RequestReader: AsyncReader<UInt8, any Error> & ~Copyable,
+///     ConcludingResponseWriter: ConcludingAsyncWriter<RequestWriter, HTTPFields?> & ~Copyable,
+///     RequestWriter: AsyncWriter<UInt8, any Error> & ~Copyable
+/// >: HTTPServerRequestHandler {
+///     func handle(
+///         request: HTTPRequest,
+///         requestContext: HTTPRequestContext,
+///         requestBodyAndTrailers: consuming sending ConcludingRequestReader,
+///         responseSender: consuming sending HTTPResponseSender<ConcludingResponseWriter>
+///     ) async throws {
+///         var responseSender: HTTPResponseSender<ConcludingResponseWriter>? = responseSender
+///         _ = try await requestBodyAndTrailers.consumeAndConclude { reader in
+///             var reader: RequestReader? = reader
+///             let responseBodyAndTrailers = try await responseSender.take()!.send(
+///                 .init(status: .ok)
+///             )
+///             try await responseBodyAndTrailers.produceAndConclude { writer in
+///                 var writer = writer
+///                 try await reader.take()!.forEach { span in
+///                     try await writer.write(span)
 ///                 }
-///                 data.reserveCapacity(data.count + span.count)
-///                 for index in span.indices {
-///                     data.append(span[index])
-///                 }
+///                 return ((), nil)
 ///             }
 ///         }
-///         return data
 ///     }
-///
-///     // Create a response
-///     var response = HTTPResponse(status: .ok)
-///     response.headerFields[.contentType] = "text/plain"
-///
-///     // Send the response and write the echo data back
-///     let responseWriter = try await responseSender.send(response)
-///     try await responseWriter.produceAndConclude { writer in
-///         var writer = writer
-///         try await writer.write(bodyData.span)
-///         return ((), nil) // No trailers
-///     }
-///  }
 /// }
 /// ```
 @available(macOS 26.0, iOS 26.0, watchOS 26.0, tvOS 26.0, visionOS 26.0, *)
