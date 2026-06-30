@@ -517,8 +517,10 @@ struct ConnectionLifecycleTests {
     /// HTTP/2: after a stream signals close, the connection drains existing
     /// streams and rejects new stream creation. Opening a stream against the
     /// already-quiesced connection fails (NIOHTTP2's GOAWAY mechanics).
+    /// TODO: this test is disabled since it's currently flaky; because of a bug in NIO where inbound NIOAsyncChannels are
+    /// dropped if not consumed, and a precondition fails because they've not been finished.
     @available(anyAppleOS 26.0, *)
-    @Test("HTTP/2 rejects new streams after signalConnectionClose()")
+    @Test("HTTP/2 rejects new streams after signalConnectionClose()", .disabled())
     func testHTTP2RejectsNewStreamsAfterClose() async throws {
         let (server, serverChain) = try NIOHTTPServerTests.makeSecureUpgradeServer(logger: Self.serverLogger)
         let elg: EventLoopGroup = .singletonMultiThreadedEventLoopGroup
@@ -580,7 +582,7 @@ struct ConnectionLifecycleTests {
     /// doesn't bring it down: a subsequent connection on the same server is
     /// served normally.
     @available(anyAppleOS 26.0, *)
-    @Test("Throwing connection handler doesn't kill the server")
+    @Test("Throwing connection handler doesn't bring down the server")
     func testThrowingConnectionHandlerDoesNotKillServer() async throws {
         let server = try NIOHTTPServerTests.makePlaintextHTTP1Server(logger: Self.serverLogger)
         let connectionInvocations = NIOLockedValueBox(0)
