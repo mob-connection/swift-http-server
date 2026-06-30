@@ -73,9 +73,11 @@ extension NIOHTTPServerConfiguration {
             transportSecurity: try .init(
                 config: snapshot.scoped(to: "transportSecurity"),
                 customCertificateVerificationCallback: customCertificateVerificationCallback
-            ),
-            backpressureStrategy: .init(config: snapshot.scoped(to: "backpressureStrategy"))
+            )
         )
+        self.backpressureStrategy = .init(config: snapshot.scoped(to: "backpressureStrategy"))
+        self.maxConnections = snapshot.int(forKey: "maxConnections")
+        self.connectionTimeouts = .init(config: snapshot.scoped(to: "connectionTimeouts"))
     }
 
     /// Reads bind targets from either the singular `bindTarget` scope or the plural `bindTargets` scope.
@@ -483,4 +485,25 @@ extension CertificateVerificationMode {
         }
     }
 }
+@available(anyAppleOS 26.0, *)
+extension NIOHTTPServerConfiguration.ConnectionTimeouts {
+    /// Initialize connection timeouts configuration from a config reader.
+    ///
+    /// ## Configuration keys:
+    /// - `idle` (int, optional, default: nil): Maximum time in seconds a connection can remain idle.
+    /// - `readHeader` (int, optional, default: nil): Maximum time in seconds to receive request headers
+    /// after a connection is established.
+    /// - `readBody` (int, optional, default: nil): Maximum time in seconds to receive the complete request
+    /// body after headers have been received.
+    ///
+    /// - Parameter config: The configuration reader.
+    public init(config: ConfigSnapshotReader) {
+        self.init(
+            idle: config.int(forKey: "idle").map { .seconds($0) },
+            readHeader: config.int(forKey: "readHeader").map { .seconds($0) },
+            readBody: config.int(forKey: "readBody").map { .seconds($0) }
+        )
+    }
+}
+
 #endif  // Configuration

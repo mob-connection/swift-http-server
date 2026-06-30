@@ -230,6 +230,60 @@ public struct NIOHTTPServerConfiguration: Sendable {
         }
     }
 
+    /// Configuration for connection timeouts.
+    ///
+    /// Timeouts are enabled by default with reasonable values to protect against
+    /// slow or idle connections. Individual timeouts can be disabled by setting
+    /// them to `nil`.
+    public struct ConnectionTimeouts: Sendable {
+        /// Maximum time the connection may sit with no request in flight before being closed.
+        ///
+        /// On HTTP/1.1, the timer runs between requests on a keep-alive connection: it starts
+        /// when the connection becomes active and is rescheduled after each response `.end` is
+        /// written. The timer is cancelled when an inbound request `.head` is observed.
+        ///
+        /// On HTTP/2, this is delegated to `NIOHTTP2ServerConnectionManagementHandler`'s
+        /// `maxIdleTime`, which fires when no streams have been open for the configured duration
+        /// and triggers a graceful shutdown.
+        ///
+        /// `nil` means no idle timeout.
+        public var idle: Duration?
+
+        /// Maximum time allowed to receive the complete request headers
+        /// after a connection is established. `nil` means no timeout.
+        public var readHeader: Duration?
+
+        /// Maximum time allowed to receive the complete request body
+        /// after headers have been received. `nil` means no timeout.
+        public var readBody: Duration?
+
+        /// - Parameters:
+        ///   - idle: Maximum idle time before the connection is closed.
+        ///   - readHeader: Maximum time to receive request headers after a connection is established.
+        ///   - readBody: Maximum time to receive the complete request body after headers have been received.
+        public init(
+            idle: Duration? = Self.defaultIdle,
+            readHeader: Duration? = Self.defaultReadHeader,
+            readBody: Duration? = Self.defaultReadBody
+        ) {
+            self.idle = idle
+            self.readHeader = readHeader
+            self.readBody = readBody
+        }
+
+        @inlinable
+        static var defaultIdle: Duration? { .seconds(60) }
+
+        @inlinable
+        static var defaultReadHeader: Duration? { .seconds(30) }
+
+        @inlinable
+        static var defaultReadBody: Duration? { .seconds(60) }
+
+        /// Default timeout values: 60s idle, 30s read header, 60s read body.
+        public static var defaults: Self { .init() }
+    }
+
     /// Network binding configuration specifying all addresses where the server should listen.
     public var bindTargets: [BindTarget]
 
@@ -242,18 +296,37 @@ public struct NIOHTTPServerConfiguration: Sendable {
     /// Backpressure strategy to use in the server.
     public var backpressureStrategy: BackPressureStrategy
 
+    /// The maximum number of concurrent connections the server will accept.
+    ///
+    /// When this limit is reached, the server stops accepting new connections
+    /// until existing ones close. `nil` means unlimited (the default).
+    ///
+    /// - Precondition: Must be greater than 0 if non-`nil`.
+    public var maxConnections: Int? {
+        didSet {
+            if let maxConnections, maxConnections <= 0 {
+                preconditionFailure("`maxConnections` must be greater than 0.")
+            }
+        }
+    }
+
+    /// Configuration for connection timeouts.
+    public var connectionTimeouts: ConnectionTimeouts
+
     /// Create a new configuration with multiple bind targets.
+    ///
+    /// Other configuration properties (``backpressureStrategy``, ``maxConnections``,
+    /// ``connectionTimeouts``) are initialized to their defaults and can be set on the resulting
+    /// value before passing it to ``NIOHTTPServer``.
+    ///
     /// - Parameters:
     ///   - bindTargets: An array of ``BindTarget`` values specifying where the server should listen.
     ///   - supportedHTTPVersions: The HTTP protocol versions the server should support.
     ///   - transportSecurity: The transport security mode (plaintext, TLS, or mTLS).
-    ///   - backpressureStrategy: A ``BackPressureStrategy``.
-    ///   Defaults to ``BackPressureStrategy/watermark(low:high:)`` with a low watermark of 2 and a high of 10.
     public init(
         bindTargets: [BindTarget],
         supportedHTTPVersions: Set<HTTPVersion>,
-        transportSecurity: TransportSecurity,
-        backpressureStrategy: BackPressureStrategy = .defaults
+        transportSecurity: TransportSecurity
     ) throws {
         if bindTargets.isEmpty {
             throw NIOHTTPServerConfigurationError.noBindTargetsSpecified
@@ -274,27 +347,30 @@ public struct NIOHTTPServerConfiguration: Sendable {
         self.bindTargets = bindTargets
         self.supportedHTTPVersions = supportedHTTPVersions
         self.transportSecurity = transportSecurity
-        self.backpressureStrategy = backpressureStrategy
+        self.backpressureStrategy = .defaults
+        self.maxConnections = nil
+        self.connectionTimeouts = .defaults
     }
 
     /// Create a new configuration with a single bind target.
+    ///
+    /// Other configuration properties (``backpressureStrategy``, ``maxConnections``,
+    /// ``connectionTimeouts``) are initialized to their defaults and can be set on the resulting
+    /// value before passing it to ``NIOHTTPServer``.
+    ///
     /// - Parameters:
     ///   - bindTarget: A ``BindTarget``.
     ///   - supportedHTTPVersions: The HTTP protocol versions the server should support.
     ///   - transportSecurity: The transport security mode (plaintext, TLS, or mTLS).
-    ///   - backpressureStrategy: A ``BackPressureStrategy``.
-    ///   Defaults to ``BackPressureStrategy/watermark(low:high:)`` with a low watermark of 2 and a high of 10.
     public init(
         bindTarget: BindTarget,
         supportedHTTPVersions: Set<HTTPVersion>,
-        transportSecurity: TransportSecurity,
-        backpressureStrategy: BackPressureStrategy = .defaults
+        transportSecurity: TransportSecurity
     ) throws {
         try self.init(
             bindTargets: [bindTarget],
             supportedHTTPVersions: supportedHTTPVersions,
-            transportSecurity: transportSecurity,
-            backpressureStrategy: backpressureStrategy
+            transportSecurity: transportSecurity
         )
     }
 }

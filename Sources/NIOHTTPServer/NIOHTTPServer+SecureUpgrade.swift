@@ -241,6 +241,12 @@ extension NIOHTTPServer {
                             try channel.pipeline.syncOperations.addHandler(
                                 serverQuiescingHelper.makeServerChannelHandler(channel: channel)
                             )
+
+                            if let maxConnections = self.configuration.maxConnections {
+                                try channel.pipeline.syncOperations.addHandler(
+                                    ConnectionLimitHandler(maxConnections: maxConnections)
+                                )
+                            }
                         }
                     }.bind(host: host, port: port) { channel in
                         self.setupSecureUpgradeConnectionChildChannel(
@@ -280,7 +286,7 @@ extension NIOHTTPServer {
             try channel.pipeline.syncOperations.configureAsyncHTTP2Pipeline(
                 mode: .server,
                 connectionManagerConfiguration: .init(
-                    maxIdleTime: nil,
+                    maxIdleTime: self.configuration.connectionTimeouts.idle.map { TimeAmount($0) },
                     maxAge: nil,
                     maxGraceTime: configuration.gracefulShutdown.maximumGracefulShutdownDuration
                         .map { TimeAmount($0) },
@@ -293,6 +299,12 @@ extension NIOHTTPServer {
                             .addHandler(
                                 HTTP2FramePayloadToHTTPServerCodec()
                             )
+
+                        // Add read header and body timeouts per-stream for HTTP/2
+                        try http2StreamChannel
+                            .pipeline
+                            .syncOperations
+                            .addReadTimeoutHandlers(self.configuration.connectionTimeouts)
 
                         return try NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>(
                             wrappingChannelSynchronously: http2StreamChannel,

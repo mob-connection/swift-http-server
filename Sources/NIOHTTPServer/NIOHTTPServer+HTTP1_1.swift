@@ -138,6 +138,12 @@ extension NIOHTTPServer {
                             try channel.pipeline.syncOperations.addHandler(
                                 serverQuiescingHelper.makeServerChannelHandler(channel: channel)
                             )
+
+                            if let maxConnections = self.configuration.maxConnections {
+                                try channel.pipeline.syncOperations.addHandler(
+                                    ConnectionLimitHandler(maxConnections: maxConnections)
+                                )
+                            }
                         }
                     }.bind(host: host, port: port) { channel in
                         self.setupHTTP1_1Connection(
@@ -179,6 +185,10 @@ extension NIOHTTPServer {
         return channel.pipeline.configureHTTPServerPipeline().flatMapThrowing {
             try channel.pipeline.syncOperations.addHandler(HTTP1ToHTTPServerCodec(secure: isSecure))
             try channel.pipeline.syncOperations.addHandler(HTTPKeepAliveHandler(closeFlag: closeFlag))
+            try channel
+                .pipeline
+                .syncOperations
+                .addTimeoutHandlers(self.configuration.connectionTimeouts)
 
             let asyncChannel = try NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>(
                 wrappingChannelSynchronously: channel,
