@@ -66,7 +66,7 @@ let package = Package(
         .target(
             name: "ExampleSupport",
             dependencies: [
-                .product(name: "Tracing", package: "swift-distributed-tracing"),
+                .product(name: "Tracing", package: "swift-distributed-tracing")
             ],
             swiftSettings: extraSettings
         ),
