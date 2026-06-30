@@ -63,10 +63,27 @@ let package = Package(
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.11.0"),
     ],
     targets: [
-        .executableTarget(
-            name: "Example",
+        .target(
+            name: "ExampleSupport",
             dependencies: [
                 .product(name: "Tracing", package: "swift-distributed-tracing"),
+            ],
+            swiftSettings: extraSettings
+        ),
+        .executableTarget(
+            name: "RequestHandlerExample",
+            dependencies: [
+                "ExampleSupport",
+                .product(name: "Instrumentation", package: "swift-distributed-tracing"),
+                .product(name: "Logging", package: "swift-log"),
+                "NIOHTTPServer",
+            ],
+            swiftSettings: extraSettings
+        ),
+        .executableTarget(
+            name: "ConnectionHandlerExample",
+            dependencies: [
+                "ExampleSupport",
                 .product(name: "Instrumentation", package: "swift-distributed-tracing"),
                 .product(name: "Logging", package: "swift-log"),
                 "NIOHTTPServer",

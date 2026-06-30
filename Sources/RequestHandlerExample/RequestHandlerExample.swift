@@ -2,7 +2,7 @@
 //
 // This source file is part of the Swift HTTP Server open source project
 //
-// Copyright (c) 2025 Apple Inc. and the Swift HTTP Server project authors
+// Copyright (c) 2026 Apple Inc. and the Swift HTTP Server project authors
 // Licensed under Apache License v2.0
 //
 // See LICENSE.txt for license information
@@ -14,6 +14,7 @@
 
 import BasicContainers
 import Crypto
+import ExampleSupport
 import Foundation
 import Instrumentation
 import Logging
@@ -22,7 +23,7 @@ import X509
 
 @main
 @available(anyAppleOS 26.0, *)
-struct Example {
+struct RequestHandlerExample {
     static func main() async throws {
         try await serve()
     }
@@ -30,8 +31,11 @@ struct Example {
     @concurrent
     static func serve() async throws {
         InstrumentationSystem.bootstrap(LogTracer())
-        var logger = Logger(label: "Logger")
-        logger.logLevel = .trace
+        let logger: Logger = {
+            var logger = Logger(label: "RequestHandlerExample")
+            logger.logLevel = .trace
+            return logger
+        }()
 
         let privateKey = P256.Signing.PrivateKey()
         let server = NIOHTTPServer(
@@ -61,7 +65,13 @@ struct Example {
             )
         )
 
+        // A single request handler is invoked for every request, regardless of
+        // which connection it arrived on. Per-request connection-scoped data
+        // (peer address, mTLS chain) is accessed via the request context's
+        // capability conformances.
         try await server.serve { request, requestContext, requestBodyAndTrailers, responseSender in
+            let peer = requestContext.remoteAddress.map { "\($0)" } ?? "unknown"
+            logger.info("request from \(peer)")
             var body = UniqueArray<UInt8>(copying: "Well, hello!".utf8)
             try await responseSender.sendAndFinish(HTTPResponse(status: .ok), buffer: &body)
         }
