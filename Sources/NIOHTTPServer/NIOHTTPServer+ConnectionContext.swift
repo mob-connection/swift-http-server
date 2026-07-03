@@ -20,9 +20,9 @@ public import X509
 @available(anyAppleOS 26.0, *)
 extension NIOHTTPServer {
     /// The application-level HTTP version negotiated for a connection.
-    public enum HTTPVersion: Sendable, Hashable {
-        case http1_1
-        case http2
+    public enum HTTPVersion: String, Sendable, Hashable {
+        case http1_1 = "http/1.1"
+        case http2 = "http/2"
     }
 }
 

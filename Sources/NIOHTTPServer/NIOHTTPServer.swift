@@ -194,8 +194,8 @@ public struct NIOHTTPServer: HTTPServer {
     public func serve(
         connectionHandler:
             @Sendable @escaping (
-                _ connection: consuming sending NIOHTTPServer.Connection,
-                _ context: NIOHTTPServer.ConnectionContext
+                _ connection: consuming sending Connection,
+                _ context: ConnectionContext
             ) async throws -> Void
     ) async throws {
         try await self.serve(

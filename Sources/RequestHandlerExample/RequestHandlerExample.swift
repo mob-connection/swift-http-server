@@ -31,49 +31,55 @@ struct RequestHandlerExample {
     @concurrent
     static func serve() async throws {
         InstrumentationSystem.bootstrap(LogTracer())
-        let logger: Logger = {
-            var logger = Logger(label: "RequestHandlerExample")
-            logger.logLevel = .trace
-            return logger
-        }()
-
-        let privateKey = P256.Signing.PrivateKey()
-        let server = NIOHTTPServer(
-            logger: logger,
-            configuration: try .init(
-                bindTarget: .hostAndPort(host: "127.0.0.1", port: 12345),
-                supportedHTTPVersions: [.http1_1, .http2(config: .init())],
-                transportSecurity: .tls(
-                    credentials: .inMemory(
-                        certificateChain: [
-                            try Certificate(
-                                version: .v3,
-                                serialNumber: .init(bytes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
-                                publicKey: .init(privateKey.publicKey),
-                                notValidBefore: Date.now.addingTimeInterval(-60),
-                                notValidAfter: Date.now.addingTimeInterval(60 * 60),
-                                issuer: DistinguishedName(),
-                                subject: DistinguishedName(),
-                                signatureAlgorithm: .ecdsaWithSHA256,
-                                extensions: .init(),
-                                issuerPrivateKey: Certificate.PrivateKey(privateKey)
-                            )
-                        ],
-                        privateKey: Certificate.PrivateKey(privateKey)
+        var rootLogger = Logger(label: "RequestHandlerExample")
+        rootLogger.logLevel = .trace
+        try await withLogger(rootLogger) { rootLogger in
+            let privateKey = P256.Signing.PrivateKey()
+            let server = NIOHTTPServer(
+                logger: rootLogger,
+                configuration: try .init(
+                    bindTarget: .hostAndPort(host: "127.0.0.1", port: 12345),
+                    supportedHTTPVersions: [.http1_1, .http2(config: .init())],
+                    transportSecurity: .tls(
+                        credentials: .inMemory(
+                            certificateChain: [
+                                try Certificate(
+                                    version: .v3,
+                                    serialNumber: .init(bytes: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]),
+                                    publicKey: .init(privateKey.publicKey),
+                                    notValidBefore: Date.now.addingTimeInterval(-60),
+                                    notValidAfter: Date.now.addingTimeInterval(60 * 60),
+                                    issuer: DistinguishedName(),
+                                    subject: DistinguishedName(),
+                                    signatureAlgorithm: .ecdsaWithSHA256,
+                                    extensions: .init(),
+                                    issuerPrivateKey: Certificate.PrivateKey(privateKey)
+                                )
+                            ],
+                            privateKey: Certificate.PrivateKey(privateKey)
+                        )
                     )
                 )
             )
-        )
 
-        // A single request handler is invoked for every request, regardless of
-        // which connection it arrived on. Per-request connection-scoped data
-        // (peer address, mTLS chain) is accessed via the request context's
-        // capability conformances.
-        try await server.serve { request, requestContext, requestBodyAndTrailers, responseSender in
-            let peer = requestContext.remoteAddress.map { "\($0)" } ?? "unknown"
-            logger.info("request from \(peer)")
-            var body = UniqueArray<UInt8>(copying: "Well, hello!".utf8)
-            try await responseSender.sendAndFinish(HTTPResponse(status: .ok), buffer: &body)
+            // A single request handler is invoked for every request, regardless of
+            // which connection it arrived on. Per-request connection-scoped data
+            // (peer address, mTLS chain) is accessed via the request context's
+            // capability conformances.
+            try await server.serve { request, requestContext, requestBodyAndTrailers, responseSender in
+                var responseSender = Optional(responseSender)
+                let peer = requestContext.remoteAddress.map { "\($0)" } ?? "unknown"
+                try await withLogger(mergingMetadata: ["peer": .string(peer)]) { requestLogger in
+                    requestLogger.info("request started")
+                    defer { requestLogger.info("request completed") }
+
+                    var body = UniqueArray<UInt8>(copying: "Well, hello!".utf8)
+                    try await responseSender.take()!.sendAndFinish(
+                        HTTPResponse(status: .ok),
+                        buffer: &body
+                    )
+                }
+            }
         }
     }
 }
