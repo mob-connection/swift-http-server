@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 
 import Logging
-import NIOConcurrencyHelpers
 import NIOCore
 import NIOExtras
 import NIOHTTP1
@@ -24,14 +23,6 @@ import NIOSSL
 
 @available(anyAppleOS 26.0, *)
 extension NIOHTTPServer {
-    /// An HTTP/1.1 connection vended by the accept loop: the async channel and
-    /// the close flag the channel's ``HTTPKeepAliveHandler`` shares with the
-    /// connection context.
-    struct HTTP1ChildConnection: Sendable {
-        let asyncChannel: NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>
-        let closeFlag: NIOLockedValueBox<Bool>
-    }
-
     /// Serves incoming plaintext HTTP/1.1 connections.
     ///
     /// Each connection is handled concurrently in its own child task. Individual connection errors are handled within
@@ -43,7 +34,7 @@ extension NIOHTTPServer {
     ///
     /// - Throws: If an error occurs while iterating the incoming connection stream.
     func serveInsecureHTTP1_1<Handler: NIOHTTPServerConnectionHandler>(
-        serverChannel: NIOAsyncChannel<HTTP1ChildConnection, Never>,
+        serverChannel: NIOAsyncChannel<NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>, Never>,
         connectionHandler: Handler
     ) async throws {
         try await serverChannel.executeThenClose { inbound in
@@ -53,10 +44,10 @@ extension NIOHTTPServer {
             // `inbound`) must be caught and handled directly.
             let inboundConnectionIterationError = await withDiscardingTaskGroup { group -> (any Error)? in
                 do {
-                    for try await child in inbound {
+                    for try await requestChannel in inbound {
                         group.addTask {
                             await self.dispatchPlaintextHTTP1_1Connection(
-                                child: child,
+                                requestChannel: requestChannel,
                                 connectionHandler: connectionHandler
                             )
                         }
@@ -83,14 +74,13 @@ extension NIOHTTPServer {
     /// `NIOAsyncWriter` is finished cleanly whether or not the connection
     /// handler called ``Connection/handleRequests(handler:)``.
     private func dispatchPlaintextHTTP1_1Connection<Handler: NIOHTTPServerConnectionHandler>(
-        child: sending HTTP1ChildConnection,
+        requestChannel: sending NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>,
         connectionHandler: Handler
     ) async {
         do {
-            try await child.asyncChannel.executeThenClose { inbound, outbound in
+            try await requestChannel.executeThenClose { inbound, outbound in
                 let context = NIOHTTPServer.makeHTTP1ConnectionContext(
-                    requestChannel: child.asyncChannel,
-                    closeFlag: child.closeFlag,
+                    requestChannel: requestChannel,
                     peerCertificateChainFuture: nil
                 )
                 let connection = Connection(
@@ -118,13 +108,13 @@ extension NIOHTTPServer {
     func setupHTTP1_1ServerChannels(
         bindTargets: [NIOHTTPServerConfiguration.BindTarget]
     ) async throws -> [(
-        NIOAsyncChannel<HTTP1ChildConnection, Never>, ServerQuiescingHelper
+        NIOAsyncChannel<NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>, Never>, ServerQuiescingHelper
     )] {
         let bootstrap = ServerBootstrap(group: self.eventLoopGroup)
             .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
 
         var serverChannels = [
-            (NIOAsyncChannel<HTTP1ChildConnection, Never>, ServerQuiescingHelper)
+            (NIOAsyncChannel<NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>, Never>, ServerQuiescingHelper)
         ]()
 
         do {
@@ -173,51 +163,37 @@ extension NIOHTTPServer {
         return serverChannels
     }
 
-    /// Configures the HTTP/1.1 server pipeline and the keep-alive handler, sharing
-    /// a fresh close flag between the keep-alive handler (which observes it when
-    /// writing the next response head) and the eventually-vended ``HTTP1ChildConnection``.
+    /// Configures the HTTP/1.1 server pipeline and the keep-alive handler.
     func setupHTTP1_1Connection(
         channel: any Channel,
         asyncChannelConfiguration: NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>.Configuration,
         isSecure: Bool
-    ) -> EventLoopFuture<HTTP1ChildConnection> {
-        let closeFlag = NIOLockedValueBox<Bool>(false)
-        return channel.pipeline.configureHTTPServerPipeline().flatMapThrowing {
+    ) -> EventLoopFuture<NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>> {
+        channel.pipeline.configureHTTPServerPipeline().flatMapThrowing {
             try channel.pipeline.syncOperations.addHandler(HTTP1ToHTTPServerCodec(secure: isSecure))
-            try channel.pipeline.syncOperations.addHandler(HTTPKeepAliveHandler(closeFlag: closeFlag))
+            try channel.pipeline.syncOperations.addHandler(HTTPKeepAliveHandler())
             try channel
                 .pipeline
                 .syncOperations
                 .addTimeoutHandlers(self.configuration.connectionTimeouts)
 
-            let asyncChannel = try NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>(
+            return try NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>(
                 wrappingChannelSynchronously: channel,
                 configuration: asyncChannelConfiguration
             )
-            return HTTP1ChildConnection(asyncChannel: asyncChannel, closeFlag: closeFlag)
         }
     }
 
     /// Builds a ``ConnectionContext`` for an HTTP/1.1 request channel.
-    ///
-    /// The context's ``ConnectionContext/signalConnectionClose()`` synchronously
-    /// flips the shared close flag the channel's ``HTTPKeepAliveHandler``
-    /// observes when writing the next response head. The synchronous set
-    /// side-steps any race between firing a NIO event off-loop and writing the
-    /// response head off-loop. The handler reacts by amending the next response
-    /// head with `Connection: close` and closing the channel once the response
-    /// `.end` is written.
     static func makeHTTP1ConnectionContext(
         requestChannel: NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>,
-        closeFlag: NIOLockedValueBox<Bool>,
         peerCertificateChainFuture: EventLoopFuture<NIOSSL.ValidatedCertificateChain?>?
     ) -> ConnectionContext {
         ConnectionContext(
             httpVersion: .http1_1,
             remoteAddress: try? NIOHTTPServer.SocketAddress(requestChannel.channel.remoteAddress),
             localAddress: try? NIOHTTPServer.SocketAddress(requestChannel.channel.localAddress),
-            peerCertificateChainFuture: peerCertificateChainFuture,
-            closeBacking: .http1_1(closeFlag: closeFlag)
+            peerCertificateChainFuture: peerCertificateChainFuture
         )
     }
 
@@ -229,10 +205,8 @@ extension NIOHTTPServer {
     /// The caller (the dispatcher) owns the channel's `executeThenClose`,
     /// so this method only iterates inbound requests and writes responses;
     /// it never closes the channel itself. The loop terminates when the
-    /// peer closes the connection, the task is cancelled, the handler
-    /// signals close (which causes the ``HTTPKeepAliveHandler`` to close
-    /// the channel after the response — the next iterator read then returns
-    /// `nil`), or an error occurs.
+    /// peer closes the connection, the task is cancelled, or an error
+    /// occurs.
     func handleHTTP1RequestLoop<Handler: HTTPServerRequestHandler>(
         inbound: NIOAsyncChannelInboundStream<HTTPRequestPart>,
         outbound: NIOAsyncChannelOutboundWriter<HTTPResponsePart>,
