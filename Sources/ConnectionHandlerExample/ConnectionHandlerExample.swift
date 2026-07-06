@@ -70,7 +70,7 @@ struct ConnectionHandlerExample {
                 var connection = Optional(connection)
                 try await withLogger(mergingMetadata: [
                     "peer": .string(context.remoteAddress.map { "\($0)" } ?? "unknown"),
-                    "http": .string(context.httpVersion.rawValue)
+                    "http": .string(context.httpVersion.rawValue),
                 ]) { connectionLogger in
                     connectionLogger.info("connection accepted")
                     defer { connectionLogger.info("connection closed") }
