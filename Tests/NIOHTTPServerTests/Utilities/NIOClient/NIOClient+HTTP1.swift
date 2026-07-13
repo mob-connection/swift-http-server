@@ -56,7 +56,16 @@ extension ClientBootstrap {
     func connectToTestHTTP1Server(
         at serverAddress: NIOHTTPServer.SocketAddress
     ) async throws -> NIOAsyncChannel<HTTPResponsePart, HTTPRequestPart> {
-        try await self.connect(to: try .init(ipAddress: serverAddress.host, port: serverAddress.port)) { channel in
+        let target: NIOCore.SocketAddress
+        if let path = serverAddress.unixDomainSocketPath {
+            target = try NIOCore.SocketAddress(unixDomainSocketPath: path)
+        } else if let host = serverAddress.host, let port = serverAddress.port {
+            target = try NIOCore.SocketAddress(ipAddress: host, port: port)
+        } else {
+            throw TestError.unsupportedAddress
+        }
+
+        return try await self.connect(to: target) { channel in
             channel.configureTestHTTP1ClientPipeline()
         }
     }

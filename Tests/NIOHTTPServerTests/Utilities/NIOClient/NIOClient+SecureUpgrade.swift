@@ -60,9 +60,16 @@ extension ClientBootstrap {
         at serverAddress: NIOHTTPServer.SocketAddress,
         tlsConfig: TLSConfiguration
     ) async throws -> NegotiatedClientConnection {
-        let clientNegotiatedChannel = try await self.connect(
-            to: try .init(ipAddress: serverAddress.host, port: serverAddress.port)
-        ) { channel in
+        let target: NIOCore.SocketAddress
+        if let path = serverAddress.unixDomainSocketPath {
+            target = try NIOCore.SocketAddress(unixDomainSocketPath: path)
+        } else if let host = serverAddress.host, let port = serverAddress.port {
+            target = try NIOCore.SocketAddress(ipAddress: host, port: port)
+        } else {
+            throw TestError.unsupportedAddress
+        }
+
+        let clientNegotiatedChannel = try await self.connect(to: target) { channel in
             channel.configureTestClientSSLPipeline(tlsConfig: tlsConfig).flatMap {
                 channel.configureTestSecureUpgradeClientPipeline()
             }

@@ -165,6 +165,10 @@ public struct NIOHTTPServer: HTTPServer {
 
         let serverChannels = try await self.makeServerChannels()
 
+        // Remove the socket files for any UDS bind targets so their paths are freed for the next run.
+        // Registered only after all binds succeeded, so every path is one we created.
+        defer { await self.removeUNIXDomainSocketFiles() }
+
         return try await withTaskCancellationHandler {
             try await withGracefulShutdownHandler {
                 try await self._serve(serverChannels: serverChannels, connectionHandler: connectionHandler)
@@ -368,6 +372,22 @@ public struct NIOHTTPServer: HTTPServer {
 
             case .secureUpgrade(let secureUpgradeChannel, _):
                 secureUpgradeChannel.channel.close(promise: nil)
+            }
+        }
+    }
+
+    /// Removes the socket files backing any unix-domain-socket bind targets.
+    private func removeUNIXDomainSocketFiles() async {
+        let fileIO = NonBlockingFileIO(threadPool: .singleton)
+        for bindTarget in self.configuration.bindTargets {
+            guard case .unixDomainSocket(let path) = bindTarget.backing else { continue }
+            do {
+                try await fileIO.unlink(path: path)
+            } catch {
+                self.logger.debug(
+                    "Failed to remove unix domain socket file",
+                    metadata: ["path": "\(path)", "error": "\(error)"]
+                )
             }
         }
     }

@@ -93,7 +93,8 @@ extension NIOHTTPServerConfiguration {
         let bindTargetScope = snapshot.scoped(to: "bindTarget")
         let singularHost = bindTargetScope.string(forKey: "host")
         let singularPort = bindTargetScope.int(forKey: "port")
-        let hasSingular = singularHost != nil || singularPort != nil
+        let singularSocketPath = bindTargetScope.string(forKey: "socketPath")
+        let hasSingular = singularHost != nil || singularPort != nil || singularSocketPath != nil
 
         if hasSingular && hasPlural {
             throw NIOHTTPServerSwiftConfigurationError.singularAndPluralBindTargetsProvided
@@ -117,17 +118,30 @@ extension NIOHTTPServerConfiguration.BindTarget {
     /// Initialize a bind target configuration from a config reader.
     ///
     /// ## Configuration keys:
-    /// - `host` (string, required): The hostname or IP address the server will bind to (e.g., "localhost", "0.0.0.0").
-    /// - `port` (int, required): The port number the server will listen on (e.g., 8080, 443).
+    /// - `host` (string): The hostname or IP address to bind to. Required unless `socketPath` is given.
+    /// - `port` (int): The port to listen on. Required unless `socketPath` is given.
+    /// - `socketPath` (string): A unix domain socket path to bind to. Mutually exclusive with `host`/`port`.
     ///
     /// - Parameter config: The configuration reader.
     public init(config: ConfigSnapshotReader) throws {
-        self.init(
-            backing: .hostAndPort(
+        let host = config.string(forKey: "host")
+        let port = config.int(forKey: "port")
+        let socketPath = config.string(forKey: "socketPath")
+
+        let backing: Backing
+        if let socketPath {
+            guard host == nil, port == nil else {
+                throw NIOHTTPServerSwiftConfigurationError.hostPortAndSocketPathProvided
+            }
+            backing = .unixDomainSocket(path: socketPath)
+        } else {
+            backing = .hostAndPort(
                 host: try config.requiredString(forKey: "host"),
                 port: try config.requiredInt(forKey: "port")
             )
-        )
+        }
+
+        self.init(backing: backing)
     }
 }
 

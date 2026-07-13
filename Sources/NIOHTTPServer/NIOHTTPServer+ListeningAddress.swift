@@ -20,6 +20,7 @@ enum ListeningAddressError: CustomStringConvertible, Error {
     case addressOrPortNotAvailable
     case unsupportedAddressType
     case serverClosed
+    case pathnameNotAvailable
 
     var description: String {
         switch self {
@@ -31,6 +32,8 @@ enum ListeningAddressError: CustomStringConvertible, Error {
             return """
                 There is no listening address bound for this server: there may have been an error which caused the server to close, or it may have shut down.
                 """
+        case .pathnameNotAvailable:
+            return "Unable to retrieve the unix domain socket path from the underlying socket"
         }
     }
 }
@@ -134,17 +137,27 @@ extension NIOHTTPServer {
 @available(anyAppleOS 26.0, *)
 extension NIOHTTPServer.SocketAddress {
     init(_ address: NIOCore.SocketAddress?) throws(ListeningAddressError) {
-        guard let address, let port = address.port else {
-            throw ListeningAddressError.addressOrPortNotAvailable
+        guard let address else {
+            throw .addressOrPortNotAvailable
         }
 
-        switch address {
-        case .v4(let ipv4Address):
-            self.init(base: .ipv4(.init(host: ipv4Address.host, port: port)))
-        case .v6(let ipv6Address):
-            self.init(base: .ipv6(.init(host: ipv6Address.host, port: port)))
-        case .unixDomainSocket:
-            throw ListeningAddressError.unsupportedAddressType
+        let base: Base = switch (address, address.port, address.pathname) {
+        case (.v4(let ipv4Address), .some(let port), _):
+                .ipv4(.init(host: ipv4Address.host, port: port))
+
+        case (.v6(let ipv6Address), .some(let port), _):
+                .ipv6(.init(host: ipv6Address.host, port: port))
+
+        case (.unixDomainSocket, _, .some(let path)):
+                .unixDomainSocket(path: path)
+
+        case (.v4, .none, _), (.v6, .none, _):
+            throw .addressOrPortNotAvailable
+
+        case (.unixDomainSocket, _, .none):
+            throw .pathnameNotAvailable
         }
+
+        self.init(base: base)
     }
 }

@@ -165,7 +165,10 @@ struct NIOHTTPServiceLifecycleTests {
 
             let (clientConnectionChannel, alpnResultFuture) =
                 try await ClientBootstrap(group: .singletonMultiThreadedEventLoopGroup).connect(
-                    to: try .init(ipAddress: serverAddress.host, port: serverAddress.port)
+                    to: try .init(
+                        ipAddress: try #require(serverAddress.host),
+                        port: try #require(serverAddress.port)
+                    )
                 ) { socketChannel in
                     socketChannel.configureTestClientSSLPipeline(tlsConfig: tlsConfig).flatMap {
                         socketChannel.configureTestSecureUpgradeClientPipeline().map { connectionChannel in

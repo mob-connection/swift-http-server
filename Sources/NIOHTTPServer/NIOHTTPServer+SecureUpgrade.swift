@@ -225,10 +225,9 @@ extension NIOHTTPServer {
         var serverChannels = [(NIOAsyncChannel<EventLoopFuture<NegotiatedChannel>, Never>, ServerQuiescingHelper)]()
         do {
             for bindTarget in bindTargets {
+                let serverQuiescingHelper = ServerQuiescingHelper(group: self.eventLoopGroup)
                 switch bindTarget.backing {
                 case .hostAndPort(let host, let port):
-                    let serverQuiescingHelper = ServerQuiescingHelper(group: self.eventLoopGroup)
-
                     let serverChannel = try await bootstrap.serverChannelInitializer { channel in
                         channel.eventLoop.makeCompletedFuture {
                             try channel.pipeline.syncOperations.addHandler(
@@ -242,6 +241,27 @@ extension NIOHTTPServer {
                             }
                         }
                     }.bind(host: host, port: port) { channel in
+                        self.setupSecureUpgradeConnectionChildChannel(
+                            channel: channel,
+                            supportedHTTPVersions: supportedHTTPVersions,
+                            sslContext: sslContext
+                        )
+                    }
+                    serverChannels.append((serverChannel, serverQuiescingHelper))
+                case .unixDomainSocket(let path):
+                    let serverChannel = try await bootstrap.serverChannelInitializer { channel in
+                        channel.eventLoop.makeCompletedFuture {
+                            try channel.pipeline.syncOperations.addHandler(
+                                serverQuiescingHelper.makeServerChannelHandler(channel: channel)
+                            )
+
+                            if let maxConnections = self.configuration.maxConnections {
+                                try channel.pipeline.syncOperations.addHandler(
+                                    ConnectionLimitHandler(maxConnections: maxConnections)
+                                )
+                            }
+                        }
+                    }.bind(unixDomainSocketPath: path) { channel in
                         self.setupSecureUpgradeConnectionChildChannel(
                             channel: channel,
                             supportedHTTPVersions: supportedHTTPVersions,

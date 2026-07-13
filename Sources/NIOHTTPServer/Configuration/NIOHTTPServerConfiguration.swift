@@ -29,6 +29,7 @@ public struct NIOHTTPServerConfiguration: Sendable {
     public struct BindTarget: Sendable {
         enum Backing {
             case hostAndPort(host: String, port: Int)
+            case unixDomainSocket(path: String)
         }
 
         let backing: Backing
@@ -47,7 +48,21 @@ public struct NIOHTTPServerConfiguration: Sendable {
         public static func hostAndPort(host: String, port: Int) -> Self {
             Self(backing: .hostAndPort(host: host, port: port))
         }
+
+        /// Creates a bind target for a unix domain socket.
+        ///
+        /// - Parameter path: The file system path to bind the unix domain socket to (e.g., "/tmp/server.sock")
+        /// - Returns: A configured `BindTarget` instance
+        ///
+        /// ## Example
+        /// ```swift
+        /// let target = BindTarget.unixDomainSocket(path: "/tmp/server.sock")
+        /// ```
+        public static func unixDomainSocket(path: String) -> Self {
+            Self(backing: .unixDomainSocket(path: path))
+        }
     }
+
 
     /// Configuration for transport security settings.
     ///

@@ -17,6 +17,7 @@ enum NIOHTTPServerConfigurationError: Error, CustomStringConvertible {
     case noSupportedHTTPVersionsSpecified
     case incompatibleTransportSecurity
     case noBindTargetsSpecified
+    case hostPortAndSocketPathProvided
 
     var description: String {
         switch self {
@@ -28,6 +29,9 @@ enum NIOHTTPServerConfigurationError: Error, CustomStringConvertible {
 
         case .noBindTargetsSpecified:
             "Invalid configuration: at least one bind target must be specified."
+
+        case .hostPortAndSocketPathProvided:
+            "Invalid configuration: a bind target has both 'host'/'port' and 'socketPath' set. Use either a host and port, or a unix domain socket path, not both."
         }
     }
 }

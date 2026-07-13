@@ -119,10 +119,9 @@ extension NIOHTTPServer {
 
         do {
             for bindTarget in bindTargets {
+                let serverQuiescingHelper = ServerQuiescingHelper(group: self.eventLoopGroup)
                 switch bindTarget.backing {
                 case .hostAndPort(let host, let port):
-                    let serverQuiescingHelper = ServerQuiescingHelper(group: self.eventLoopGroup)
-
                     let serverChannel = try await bootstrap.serverChannelInitializer { channel in
                         channel.eventLoop.makeCompletedFuture {
                             try channel.pipeline.syncOperations.addHandler(
@@ -136,6 +135,30 @@ extension NIOHTTPServer {
                             }
                         }
                     }.bind(host: host, port: port) { channel in
+                        self.setupHTTP1_1Connection(
+                            channel: channel,
+                            asyncChannelConfiguration: .init(
+                                backPressureStrategy: .init(self.configuration.backpressureStrategy),
+                                isOutboundHalfClosureEnabled: true
+                            ),
+                            isSecure: false
+                        )
+                    }
+                    serverChannels.append((serverChannel, serverQuiescingHelper))
+                case .unixDomainSocket(let path):
+                    let serverChannel = try await bootstrap.serverChannelInitializer { channel in
+                        channel.eventLoop.makeCompletedFuture {
+                            try channel.pipeline.syncOperations.addHandler(
+                                serverQuiescingHelper.makeServerChannelHandler(channel: channel)
+                            )
+
+                            if let maxConnections = self.configuration.maxConnections {
+                                try channel.pipeline.syncOperations.addHandler(
+                                    ConnectionLimitHandler(maxConnections: maxConnections)
+                                )
+                            }
+                        }
+                    }.bind(unixDomainSocketPath: path) { channel in
                         self.setupHTTP1_1Connection(
                             channel: channel,
                             asyncChannelConfiguration: .init(
