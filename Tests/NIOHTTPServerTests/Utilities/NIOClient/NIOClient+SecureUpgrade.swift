@@ -61,12 +61,14 @@ extension ClientBootstrap {
         tlsConfig: TLSConfiguration
     ) async throws -> NegotiatedClientConnection {
         let target: NIOCore.SocketAddress
-        if let path = serverAddress.unixDomainSocketPath {
+
+        switch serverAddress.base {
+        case .ipv4(let address):
+            target = try NIOCore.SocketAddress(ipAddress: address.host, port: address.port)
+        case .ipv6(let address):
+            target = try NIOCore.SocketAddress(ipAddress: address.host, port: address.port)
+        case .unixDomainSocket(path: let path):
             target = try NIOCore.SocketAddress(unixDomainSocketPath: path)
-        } else if let host = serverAddress.host, let port = serverAddress.port {
-            target = try NIOCore.SocketAddress(ipAddress: host, port: port)
-        } else {
-            throw TestError.unsupportedAddress
         }
 
         let clientNegotiatedChannel = try await self.connect(to: target) { channel in

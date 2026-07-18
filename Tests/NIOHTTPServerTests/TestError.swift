@@ -17,5 +17,4 @@ enum TestError: Error {
     case errorWhileReading
     case errorWhileWriting
     case intentional
-    case unsupportedAddress
 }
