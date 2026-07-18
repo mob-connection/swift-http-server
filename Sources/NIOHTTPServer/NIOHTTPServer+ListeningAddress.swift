@@ -15,19 +15,20 @@
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
+import System
 
 enum ListeningAddressError: CustomStringConvertible, Error {
-    case addressOrPortNotAvailable
-    case unsupportedAddressType
+    case addressNotAvailable
+    case portNotAvailable
     case serverClosed
     case pathnameNotAvailable
 
     var description: String {
         switch self {
-        case .addressOrPortNotAvailable:
-            return "Unable to retrieve the bound address or port from the underlying socket"
-        case .unsupportedAddressType:
-            return "Unsupported address type: only IPv4 and IPv6 are supported"
+        case .addressNotAvailable:
+            return "Unable to retrieve the bound address from the underlying socket"
+        case .portNotAvailable:
+            return "Unable to retrieve the bound port from the underlying socket"
         case .serverClosed:
             return """
                 There is no listening address bound for this server: there may have been an error which caused the server to close, or it may have shut down.
@@ -138,24 +139,38 @@ extension NIOHTTPServer {
 extension NIOHTTPServer.SocketAddress {
     init(_ address: NIOCore.SocketAddress?) throws(ListeningAddressError) {
         guard let address else {
-            throw .addressOrPortNotAvailable
+            throw .addressNotAvailable
         }
 
-        let base: Base = switch (address, address.port, address.pathname) {
-        case (.v4(let ipv4Address), .some(let port), _):
-                .ipv4(.init(host: ipv4Address.host, port: port))
+        var port: Int {
+            get throws(ListeningAddressError) {
+                guard let port = address.port else {
+                    throw .portNotAvailable
+                }
+                return port
+            }
+        }
 
-        case (.v6(let ipv6Address), .some(let port), _):
-                .ipv6(.init(host: ipv6Address.host, port: port))
+        var pathname: String {
+            get throws(ListeningAddressError) {
+                guard let pathname = address.pathname else {
+                    throw .pathnameNotAvailable
+                }
+                return pathname
+            }
+        }
 
-        case (.unixDomainSocket, _, .some(let path)):
-                .unixDomainSocket(path: path)
+        let base: NIOHTTPServer.SocketAddress.Base
 
-        case (.v4, .none, _), (.v6, .none, _):
-            throw .addressOrPortNotAvailable
+        switch address {
+        case .v4(let ipv4Address):
+            base = try .ipv4(.init(host: ipv4Address.host, port: port))
 
-        case (.unixDomainSocket, _, .none):
-            throw .pathnameNotAvailable
+        case .v6(let ipv6Address):
+            base = try .ipv6(.init(host: ipv6Address.host, port: port))
+
+        case .unixDomainSocket(_):
+            base = try .unixDomainSocket(path: pathname)
         }
 
         self.init(base: base)

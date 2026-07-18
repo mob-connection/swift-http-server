@@ -19,6 +19,8 @@ import NIOHTTPTypes
 import NIOHTTPTypesHTTP1
 import NIOPosix
 
+@testable import NIOHTTPServer
+
 @available(anyAppleOS 26.0, *)
 extension Channel {
     /// Adds HTTP/1.1 client handlers to the pipeline.
@@ -57,12 +59,14 @@ extension ClientBootstrap {
         at serverAddress: NIOHTTPServer.SocketAddress
     ) async throws -> NIOAsyncChannel<HTTPResponsePart, HTTPRequestPart> {
         let target: NIOCore.SocketAddress
-        if let path = serverAddress.unixDomainSocketPath {
+
+        switch serverAddress.base {
+        case .ipv4(let address):
+            target = try NIOCore.SocketAddress(ipAddress: address.host, port: address.port)
+        case .ipv6(let address):
+            target = try NIOCore.SocketAddress(ipAddress: address.host, port: address.port)
+        case .unixDomainSocket(path: let path):
             target = try NIOCore.SocketAddress(unixDomainSocketPath: path)
-        } else if let host = serverAddress.host, let port = serverAddress.port {
-            target = try NIOCore.SocketAddress(ipAddress: host, port: port)
-        } else {
-            throw TestError.unsupportedAddress
         }
 
         return try await self.connect(to: target) { channel in
