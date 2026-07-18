@@ -17,6 +17,7 @@ import Foundation
 import Logging
 import NIOHTTPServer
 import Testing
+import System
 
 @Suite
 struct HTTPServerTests {
@@ -71,11 +72,12 @@ struct HTTPServerTests {
         // Guard against a leftover file from a previously crashed run, and clean up if this test fails early.
         try? FileManager.default.removeItem(atPath: socketPath)
         defer { try? FileManager.default.removeItem(atPath: socketPath) }
+        let filePath = FilePath(socketPath)
 
         let server = NIOHTTPServer(
             logger: Logger(label: "Test"),
             configuration: try .init(
-                bindTarget: .unixDomainSocket(path: socketPath),
+                bindTarget: .unixDomainSocket(path: filePath),
                 supportedHTTPVersions: [.http1_1],
                 transportSecurity: .plaintext
             )
@@ -109,11 +111,12 @@ struct HTTPServerTests {
         // Simulate a leftover/occupied socket by pre-creating a file at the path.
         #expect(FileManager.default.createFile(atPath: socketPath, contents: nil))
         defer { try? FileManager.default.removeItem(atPath: socketPath) }
+        let filePath = FilePath(socketPath)
 
         let server = NIOHTTPServer(
             logger: Logger(label: "Test"),
             configuration: try .init(
-                bindTarget: .unixDomainSocket(path: socketPath),
+                bindTarget: .unixDomainSocket(path: filePath),
                 supportedHTTPVersions: [.http1_1],
                 transportSecurity: .plaintext
             )

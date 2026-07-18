@@ -15,6 +15,7 @@
 import NIOCore
 import NIOSSL
 public import X509
+public import System
 
 /// Configuration settings for ``NIOHTTPServer``.
 ///
@@ -29,7 +30,7 @@ public struct NIOHTTPServerConfiguration: Sendable {
     public struct BindTarget: Sendable {
         enum Backing {
             case hostAndPort(host: String, port: Int)
-            case unixDomainSocket(path: String)
+            case unixDomainSocket(path: FilePath)
         }
 
         let backing: Backing
@@ -58,7 +59,7 @@ public struct NIOHTTPServerConfiguration: Sendable {
         /// ```swift
         /// let target = BindTarget.unixDomainSocket(path: "/tmp/server.sock")
         /// ```
-        public static func unixDomainSocket(path: String) -> Self {
+        public static func unixDomainSocket(path: FilePath) -> Self {
             Self(backing: .unixDomainSocket(path: path))
         }
     }

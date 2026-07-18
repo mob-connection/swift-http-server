@@ -30,6 +30,7 @@ import ServiceLifecycle
 import SwiftASN1
 import Synchronization
 import X509
+import System
 
 /// A generic HTTP server that can handle incoming HTTP requests.
 ///
@@ -382,7 +383,7 @@ public struct NIOHTTPServer: HTTPServer {
         for bindTarget in self.configuration.bindTargets {
             guard case .unixDomainSocket(let path) = bindTarget.backing else { continue }
             do {
-                try await fileIO.unlink(path: path)
+                try await fileIO.unlink(path: path.string)
             } catch {
                 self.logger.debug(
                     "Failed to remove unix domain socket file",

@@ -20,6 +20,7 @@ import NIOHTTPTypes
 import NIOHTTPTypesHTTP1
 import NIOPosix
 import NIOSSL
+import System
 
 @available(anyAppleOS 26.0, *)
 extension NIOHTTPServer {
@@ -158,7 +159,7 @@ extension NIOHTTPServer {
                                 )
                             }
                         }
-                    }.bind(unixDomainSocketPath: path) { channel in
+                    }.bind(unixDomainSocketPath: path.string) { channel in
                         self.setupHTTP1_1Connection(
                             channel: channel,
                             asyncChannelConfiguration: .init(

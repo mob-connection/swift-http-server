@@ -26,6 +26,7 @@ import NIOPosix
 import NIOSSL
 import NIOTLS
 import X509
+import System
 
 @available(anyAppleOS 26.0, *)
 extension NIOHTTPServer {
@@ -261,7 +262,7 @@ extension NIOHTTPServer {
                                 )
                             }
                         }
-                    }.bind(unixDomainSocketPath: path) { channel in
+                    }.bind(unixDomainSocketPath: path.string) { channel in
                         self.setupSecureUpgradeConnectionChildChannel(
                             channel: channel,
                             supportedHTTPVersions: supportedHTTPVersions,

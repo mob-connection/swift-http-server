@@ -19,6 +19,7 @@ import NIOCertificateReloading
 import NIOHTTP2
 import SwiftASN1
 public import X509
+import System
 
 @available(anyAppleOS 26.0, *)
 extension NIOHTTPServerConfiguration {
@@ -133,7 +134,8 @@ extension NIOHTTPServerConfiguration.BindTarget {
             guard host == nil, port == nil else {
                 throw NIOHTTPServerSwiftConfigurationError.hostPortAndSocketPathProvided
             }
-            backing = .unixDomainSocket(path: socketPath)
+            let filePath = FilePath(socketPath)
+            backing = .unixDomainSocket(path: filePath)
         } else {
             backing = .hostAndPort(
                 host: try config.requiredString(forKey: "host"),
