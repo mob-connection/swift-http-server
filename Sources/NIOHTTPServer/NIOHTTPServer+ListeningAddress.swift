@@ -160,19 +160,54 @@ extension NIOHTTPServer.SocketAddress {
             }
         }
 
-        let base: NIOHTTPServer.SocketAddress.Base
+        switch address {
+        case .v4(let ipv4Address):
+            try self.init(base: .ipv4(.init(host: ipv4Address.host, port: port)))
+
+        case .v6(let ipv6Address):
+            try self.init(base: .ipv6(.init(host: ipv6Address.host, port: port)))
+
+        case .unixDomainSocket(_):
+            try self.init(base: .unixDomainSocket(path: pathname))
+        }
+    }
+}
+
+@available(anyAppleOS 26.0, *)
+extension NIOHTTPServerConfiguration.BindTarget {
+    init(_ address: NIOCore.SocketAddress?) throws(ListeningAddressError) {
+        guard let address else {
+            throw .addressNotAvailable
+        }
+
+        var port: Int {
+            get throws(ListeningAddressError) {
+                guard let port = address.port else {
+                    throw .portNotAvailable
+                }
+                return port
+            }
+        }
+
+        var filePath: FilePath {
+            get throws(ListeningAddressError) {
+                guard let pathname = address.pathname else {
+                    throw .pathnameNotAvailable
+                }
+                let filePath = FilePath(pathname)
+                return filePath
+            }
+        }
 
         switch address {
         case .v4(let ipv4Address):
-            base = try .ipv4(.init(host: ipv4Address.host, port: port))
+            try self.init(backing: .hostAndPort(host: ipv4Address.host, port: port))
 
         case .v6(let ipv6Address):
-            base = try .ipv6(.init(host: ipv6Address.host, port: port))
+            try self.init(backing: .hostAndPort(host: ipv6Address.host, port: port))
 
         case .unixDomainSocket(_):
-            base = try .unixDomainSocket(path: pathname)
+            try self.init(backing: .unixDomainSocket(path: filePath))
         }
-
-        self.init(base: base)
     }
 }
