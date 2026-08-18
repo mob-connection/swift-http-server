@@ -52,12 +52,13 @@ extension Channel {
 
 @available(anyAppleOS 26.0, *)
 extension ClientBootstrap {
-    /// Connects to the provided `serverAddress` and provides a `NIOAsyncChannel`. With this ``NIOAsyncChannel``, one
-    /// can write `HTTPRequestPart`s to the server and observe `HTTPResponsePart`s from the inbound stream of the
-    /// channel.
+    /// Connects to the provided `serverAddress` over plaintext HTTP/1.1 and returns a ``TestClientConnection``
+    /// wrapping the established connection. Use ``TestClientConnection/makeRequestChannel()`` to obtain a
+    /// `NIOAsyncChannel` for writing `HTTPRequestPart`s to the server and observing `HTTPResponsePart`s from its
+    /// inbound stream.
     func connectToTestHTTP1Server(
         at serverAddress: NIOHTTPServer.SocketAddress
-    ) async throws -> NIOAsyncChannel<HTTPResponsePart, HTTPRequestPart> {
+    ) async throws -> TestClientConnection {
         let target: NIOCore.SocketAddress
 
         switch serverAddress.base {
@@ -69,8 +70,12 @@ extension ClientBootstrap {
             target = try NIOCore.SocketAddress(unixDomainSocketPath: path)
         }
 
-        return try await self.connect(to: target) { channel in
-            channel.configureTestHTTP1ClientPipeline()
-        }
+        return .init(
+            connectionProtocol: .http1(
+                connectionChannel: try await self.connect(to: target) { channel in
+                    channel.configureTestHTTP1ClientPipeline()
+                }
+            )
+        )
     }
 }

@@ -46,7 +46,6 @@ import System
 ///
 /// ```swift
 /// let server = NIOHTTPServer(
-///     logger: logger,
 ///     configuration: try .init(
 ///         bindTarget: .hostAndPort(host: "localhost", port: 8080),
 ///         supportedHTTPVersions: [.http1_1],
@@ -81,7 +80,7 @@ public struct NIOHTTPServer: HTTPServer {
     ///   - logger: A logger instance for recording server events and debugging information.
     ///   - configuration: The server configuration including bind target and TLS settings.
     public init(
-        logger: Logger,
+        logger: Logger = .current,
         configuration: NIOHTTPServerConfiguration,
     ) {
         self.logger = logger
@@ -209,24 +208,19 @@ public struct NIOHTTPServer: HTTPServer {
     }
 
     /// Creates and returns server channels based on the configured transport security.
-    private func makeServerChannels() async throws -> [ServerChannel] {
-        // If transport security is `plaintext`, we can only create an HTTP/1.1 channel.
-        if case .plaintext = self.configuration.transportSecurity.backing {
-            let http1Channels = try await self.setupHTTP1_1ServerChannels(bindTargets: self.configuration.bindTargets)
-            try self.addressesBound(http1Channels.map { (channel, _) in channel.channel.localAddress })
-            return http1Channels.map { (channel, quiescingHelper) in
-                .plaintextHTTP1_1(channel: channel, quiescingHelper: quiescingHelper)
-            }
-        }
-
+    func makeServerChannels() async throws -> [ServerChannel] {
         var serverChannels = [ServerChannel]()
         var secureUpgradeBindTargets = self.configuration.bindTargets
 
         #if HTTP3
-        if let http3Config = self.configuration.supportedHTTPVersions.http3ConfigIfSupported {
+        if let http3Configuration = self.configuration.supportedHTTPVersions.http3ConfigIfSupported,
+            let authenticationConfiguration = self.configuration.quicAuthenticationConfiguration
+        {
             let http3Channels = try await self.setupHTTP3ServerChannels(
                 bindTargets: self.configuration.bindTargets,
-                http3Configuration: http3Config
+                http3Configuration: http3Configuration,
+                authenticationConfiguration: authenticationConfiguration,
+                authenticator: self.configuration.quicAuthenticator
             )
             serverChannels.append(
                 contentsOf: http3Channels.map { (quicChannel, mux) in
@@ -234,7 +228,7 @@ public struct NIOHTTPServer: HTTPServer {
                 }
             )
 
-            guard self.configuration.supportedHTTPVersions.count > 1 else {
+            if self.configuration.sslContext == nil {
                 // `supportedHTTPVersions == [.http3]` here. We therefore just return HTTP/3 channel(s).
                 try self.addressesBound(http3Channels.map { (channel, _) in channel.localAddress })
                 return serverChannels
@@ -247,13 +241,17 @@ public struct NIOHTTPServer: HTTPServer {
         }
         #endif  // HTTP3
 
+        guard let sslContext = self.configuration.sslContext else {
+            // Set up plaintext HTTP/1.1 channel(s).
+            let http1Channels = try await self.setupHTTP1_1ServerChannels(bindTargets: secureUpgradeBindTargets)
+            try self.addressesBound(http1Channels.map { (channel, _) in channel.channel.localAddress })
+            return http1Channels.map { .plaintextHTTP1_1(channel: $0, quiescingHelper: $1) }
+        }
+
         let secureUpgradeChannels = try await self.setupSecureUpgradeServerChannels(
             bindTargets: secureUpgradeBindTargets,
-            supportedHTTPVersions: self.configuration.supportedHTTPVersions,
-            sslContext: .makeServerContext(
-                transportSecurity: self.configuration.transportSecurity,
-                alpnIdentifiers: self.configuration.supportedHTTPVersions.alpnIdentifiers
-            )
+            http2Configuration: self.configuration.supportedHTTPVersions.http2ConfigIfSupported,
+            sslContext: sslContext
         )
         try self.addressesBound(secureUpgradeChannels.map { (channel, _) in channel.channel.localAddress })
 
@@ -348,14 +346,22 @@ public struct NIOHTTPServer: HTTPServer {
         let readerState = Reader.ReaderState(iterator: iterator)
         let writerState = ResponseSender.WriterState()
 
+        #if HTTP3 && UnstableHTTPDatagrams
+        // TODO: `swift-nio-http3` currently does not provide APIs for reading/writing bytes on the unreliable datagram
+        // stream. This is why we currently pass `nil` to the `datagramReader` and `datagramWriter` arguments.
+        let requestReader = Reader(readerState: readerState, datagramReader: nil)
+        let responseSender = ResponseSender(writer: outbound, writerState: writerState, datagramWriter: nil)
+        #else
+        let requestReader = Reader(readerState: readerState)
+        let responseSender = ResponseSender(writer: outbound, writerState: writerState)
+        #endif
+
         do {
             try await handler.handle(
                 request: request,
                 requestContext: RequestContext(connectionContext: context),
-                reader: Reader(
-                    readerState: readerState
-                ),
-                responseSender: ResponseSender(writer: outbound, writerState: writerState)
+                reader: requestReader,
+                responseSender: responseSender
             )
         } catch {
             logger.error("Error thrown while handling request: \(error)")
@@ -422,7 +428,7 @@ public struct NIOHTTPServer: HTTPServer {
     }
 
     /// Forcefully closes the server channels without waiting for existing connections to drain.
-    private func close(serverChannels: [ServerChannel]) {
+    func close(serverChannels: [ServerChannel]) {
         self.finishListeningAddressPromise()
 
         for serverChannel in serverChannels {
@@ -464,9 +470,17 @@ extension ChannelPipeline.SynchronousOperations {
     /// Adds timeout handlers (idle, read header, read body) to the channel pipeline.
     ///
     /// Only handlers for non-nil timeouts are installed.
-    func addTimeoutHandlers(_ timeouts: NIOHTTPServerConfiguration.ConnectionTimeouts) throws {
+    ///
+    /// - Parameters:
+    ///   - timeouts: The configured connection timeouts. Only handlers for non-nil timeouts are installed.
+    ///   - expectMultipleRequests: Whether the channel can receive more than one request. Pass `true` for an HTTP/1.1
+    ///     connection channel (for keep-alive), and `false` for an HTTP/2 or HTTP/3 stream channel.
+    func addTimeoutHandlers(
+        _ timeouts: NIOHTTPServerConfiguration.ConnectionTimeouts,
+        expectMultipleRequests: Bool
+    ) throws {
         try self.addIdleTimeoutHandlers(timeouts)
-        try self.addReadTimeoutHandlers(timeouts)
+        try self.addReadTimeoutHandlers(timeouts, expectMultipleRequests: expectMultipleRequests)
     }
 
     /// Adds the connection idle timeout handler to the channel. Used by HTTP/1.1 connection channels. HTTP/2 delegates
@@ -481,12 +495,24 @@ extension ChannelPipeline.SynchronousOperations {
     }
 
     /// Adds header and body read timeout handlers to the channel.
-    func addReadTimeoutHandlers(_ timeouts: NIOHTTPServerConfiguration.ConnectionTimeouts) throws {
+    ///
+    /// - Parameters:
+    ///   - timeouts: The configured connection timeouts. No handler is installed if both read timeouts are `nil`.
+    ///   - expectMultipleRequests: Whether the channel can receive more than one request. Pass `true` for an HTTP/1.1
+    ///     connection channel (for keep-alive), and `false` for an HTTP/2 or HTTP/3 stream channel.
+    func addReadTimeoutHandlers(
+        _ timeouts: NIOHTTPServerConfiguration.ConnectionTimeouts,
+        expectMultipleRequests: Bool
+    ) throws {
         let readHeader = timeouts.readHeader.map { TimeAmount($0) }
         let readBody = timeouts.readBody.map { TimeAmount($0) }
         if readHeader != nil || readBody != nil {
             try self.addHandler(
-                RequestTimeoutHandler(readHeaderTimeout: readHeader, readBodyTimeout: readBody)
+                RequestTimeoutHandler(
+                    readHeaderTimeout: readHeader,
+                    readBodyTimeout: readBody,
+                    expectMultipleRequests: expectMultipleRequests
+                )
             )
         }
     }

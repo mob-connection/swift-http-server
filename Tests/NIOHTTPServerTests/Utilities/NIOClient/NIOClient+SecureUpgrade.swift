@@ -17,7 +17,6 @@ import NIOHTTP2
 import NIOHTTPTypes
 import NIOPosix
 import NIOSSL
-import X509
 
 @testable import NIOHTTPServer
 
@@ -59,7 +58,7 @@ extension ClientBootstrap {
     func connectToTestSecureUpgradeHTTPServer(
         at serverAddress: NIOHTTPServer.SocketAddress,
         tlsConfig: TLSConfiguration
-    ) async throws -> NegotiatedClientConnection {
+    ) async throws -> TestClientConnection {
         let target: NIOCore.SocketAddress
 
         switch serverAddress.base {
@@ -71,66 +70,17 @@ extension ClientBootstrap {
             target = try NIOCore.SocketAddress(unixDomainSocketPath: path)
         }
 
-        let clientNegotiatedChannel = try await self.connect(to: target) { channel in
+        let (connectionChannel, alpnResultFuture) = try await self.connect(to: target) { channel in
             channel.configureTestClientSSLPipeline(tlsConfig: tlsConfig).flatMap {
-                channel.configureTestSecureUpgradeClientPipeline()
+                channel.configureTestSecureUpgradeClientPipeline().map { alpnResultFuture in
+                    (channel, alpnResultFuture)
+                }
             }
-        }.get()
-
-        switch clientNegotiatedChannel {
-        case .http1_1(let http1Channel):
-            return .http1(http1Channel)
-
-        case .http2(let http2Channel):
-            return .http2(.init(http2StreamMultiplexer: http2Channel))
         }
-    }
 
-    /// Creates and connects a TLS-enabled client to the specified address.
-    func connectToTestSecureUpgradeHTTPServer(
-        at serverAddress: NIOHTTPServer.SocketAddress,
-        trustRoots: [Certificate],
-        applicationProtocol: String
-    ) async throws -> NegotiatedClientConnection {
-        let tlsConfig = try TLSConfiguration.makeTestClientConfiguration(
-            testTrustRoots: trustRoots,
-            applicationProtocol: applicationProtocol
+        return try await TestClientConnection(
+            alpnNegotiationResult: try await alpnResultFuture.get(),
+            connectionChannel: connectionChannel
         )
-
-        return try await self.connectToTestSecureUpgradeHTTPServer(at: serverAddress, tlsConfig: tlsConfig)
-    }
-
-    /// Exactly like ``connectToTestSecureUpgradeHTTPServerOverMTLS(at:trustRoots:applicationProtocol:)`` but over mTLS
-    /// instead.
-    func connectToTestSecureUpgradeHTTPServerOverMTLS(
-        at serverAddress: NIOHTTPServer.SocketAddress,
-        clientChain: ChainPrivateKeyPair,
-        trustRoots: [Certificate],
-        applicationProtocol: String
-    ) async throws -> NegotiatedClientConnection {
-        var mTLSConfig = try TLSConfiguration.makeTestClientConfiguration(
-            testTrustRoots: trustRoots,
-            applicationProtocol: applicationProtocol
-        )
-        mTLSConfig.certificateChain = [try NIOSSLCertificateSource(clientChain.leaf)]
-        mTLSConfig.privateKey = .privateKey(try .init(clientChain.privateKey))
-
-        return try await self.connectToTestSecureUpgradeHTTPServer(at: serverAddress, tlsConfig: mTLSConfig)
-    }
-}
-
-extension TLSConfiguration {
-    /// Valid `applicationProtocol` values are `"http/1.1"` (forces HTTP/1.1), `"h2"` (forces HTTP/2), or a
-    /// comma-separated combination of both in order of preference, e.g. `"http/1.1, h2"`.
-    static func makeTestClientConfiguration(
-        testTrustRoots: [Certificate],
-        applicationProtocol: String
-    ) throws -> TLSConfiguration {
-        var clientTLSConfig = TLSConfiguration.makeClientConfiguration()
-        clientTLSConfig.trustRoots = .certificates(try testTrustRoots.map { try NIOSSLCertificate($0) })
-        clientTLSConfig.certificateVerification = .noHostnameVerification
-        clientTLSConfig.applicationProtocols = [applicationProtocol]
-
-        return clientTLSConfig
     }
 }

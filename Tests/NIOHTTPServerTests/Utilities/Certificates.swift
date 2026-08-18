@@ -14,8 +14,12 @@
 
 import Crypto
 import Foundation
+import SwiftASN1
 import X509
 
+@testable import NIOHTTPServer
+
+@available(anyAppleOS 26.0, *)
 struct ChainPrivateKeyPair {
     let leaf: Certificate
     let ca: Certificate
@@ -31,10 +35,34 @@ struct ChainPrivateKeyPair {
             return certs.joined(separator: "\n")
         }
     }
+
+    func writeToDisk(
+        encoding: NIOHTTPServerConfiguration.TransportSecurity.Encoding = .pem
+    ) throws -> (leafPath: String, caPath: String, keyPath: String) {
+        let uuid = UUID().uuidString
+        let leafPath = FileManager.default.temporaryDirectory.appendingPathComponent("leaf-\(uuid)")
+        let caPath = FileManager.default.temporaryDirectory.appendingPathComponent("ca-\(uuid)")
+        let keyPath = FileManager.default.temporaryDirectory.appendingPathComponent("key-\(uuid)")
+
+        switch encoding {
+        case .pem:
+            try Data(self.leaf.serializeAsPEM().pemString.utf8).write(to: leafPath)
+            try Data(self.ca.serializeAsPEM().pemString.utf8).write(to: caPath)
+            try Data(self.privateKey.serializeAsPEM().pemString.utf8).write(to: keyPath)
+
+        case .der:
+            try Data(self.leaf.serializeAsPEM().derBytes).write(to: leafPath)
+            try Data(self.ca.serializeAsPEM().derBytes).write(to: caPath)
+            try Data(self.privateKey.serializeAsPEM().derBytes).write(to: keyPath)
+        }
+
+        return (leafPath.path, caPath.path, keyPath.path)
+    }
 }
 
+@available(anyAppleOS 26.0, *)
 struct TestCA {
-    static func makeSelfSignedChain() throws -> ChainPrivateKeyPair {
+    static func makeSelfSignedChain(leafExtensions: Certificate.Extensions = .init()) throws -> ChainPrivateKeyPair {
         let caKey = P384.Signing.PrivateKey()
         let caName = try DistinguishedName { OrganizationName("Test CA") }
         let ca = try makeCA(name: caName, privateKey: caKey)
@@ -47,7 +75,7 @@ struct TestCA {
             issuerKey: .init(caKey),
             publicKey: .init(leafKey.publicKey),
             subject: leafName,
-            extensions: .init()
+            extensions: leafExtensions
         )
 
         return ChainPrivateKeyPair(leaf: leaf, ca: ca, privateKey: .init(leafKey))
@@ -83,6 +111,24 @@ struct TestCA {
             signatureAlgorithm: .ecdsaWithSHA384,
             extensions: extensions,
             issuerPrivateKey: issuerKey
+        )
+    }
+
+    /// Creates a self-signed certificate chain with a SAN for the leaf certificate.
+    static func makeSelfSignedChainWithSAN(
+        leafSAN: SubjectAlternativeNames = SubjectAlternativeNames([
+            .dnsName("127.0.0.1"),
+            .ipAddress(ASN1OctetString(contentBytes: [127, 0, 0, 1])),
+        ])
+    ) throws -> ChainPrivateKeyPair {
+        try TestCA.makeSelfSignedChain(
+            leafExtensions: try Certificate.Extensions {
+                BasicConstraints.notCertificateAuthority
+
+                try ExtendedKeyUsage([.serverAuth])
+
+                leafSAN
+            }
         )
     }
 }

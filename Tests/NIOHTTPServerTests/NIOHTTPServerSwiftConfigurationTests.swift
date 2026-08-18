@@ -588,6 +588,7 @@ struct NIOHTTPServerSwiftConfigurationTests {
         @Test("End-to-end HTTP/3 configuration over TLS")
         @available(anyAppleOS 26.0, *)
         func testEndToEnd() throws {
+            let (leafPath, _, keyPath) = try TestCA.makeSelfSignedChain().writeToDisk()
             let provider = InMemoryProvider(values: [
                 "bindTarget.host": "127.0.0.1",
                 "bindTarget.port": 8000,
@@ -598,8 +599,8 @@ struct NIOHTTPServerSwiftConfigurationTests {
                 "http.http3.quicConfiguration.sendRetry": true,
                 "transportSecurity.mode": "tls",
                 "transportSecurity.credentialSource": "file",
-                "transportSecurity.certificateChainPEMPath": .init(.string("cert.pem"), isSecret: false),
-                "transportSecurity.privateKeyPEMPath": .init(.string("key.pem"), isSecret: true),
+                "transportSecurity.certificateChainPEMPath": .init(.string(leafPath), isSecret: false),
+                "transportSecurity.privateKeyPEMPath": .init(.string(keyPath), isSecret: true),
             ])
             let config = ConfigReader(provider: provider)
 
@@ -680,7 +681,9 @@ struct NIOHTTPServerSwiftConfigurationTests {
                     return
                 }
 
-                guard case .inMemory(let certificateChain, let privateKey) = credentials.backing else {
+                guard case .x509(let x509) = credentials.backing,
+                    case .certificates(let certificateChain, let privateKey) = x509.backing
+                else {
                     Issue.record("Expected in-memory TLS credentials, got \(credentials.backing) instead.")
                     return
                 }
@@ -711,7 +714,9 @@ struct NIOHTTPServerSwiftConfigurationTests {
                     return
                 }
 
-                guard case .reloading = credentials.backing else {
+                guard case .x509(let x509Credentials) = credentials.backing,
+                    case .reloading = x509Credentials.backing
+                else {
                     Issue.record("Expected reloading TLS credentials, got \(credentials.backing) instead.")
                     return
                 }
@@ -738,11 +743,49 @@ struct NIOHTTPServerSwiftConfigurationTests {
                     return
                 }
 
-                guard case .pemFile = credentials.backing else {
+                guard case .x509(let x509Credentials) = credentials.backing,
+                    case .serialized(.file(_, _, .pem)) = x509Credentials.backing
+                else {
                     Issue.record("Expected PEM file TLS credentials, got \(credentials.backing) instead.")
                     return
                 }
             }
+
+            #if HTTP3
+            @Test("Raw public key credentials")
+            @available(anyAppleOS 26.0, *)
+            func testRawPublicKeyCredentials() throws {
+                let provider = InMemoryProvider(
+                    values: [
+                        "mode": "tls",
+                        "credentialSource": "rawPublicKey",
+                        "publicKeyDERPath": .init(.string("public.der"), isSecret: false),
+                        "privateKeyDERPath": .init(.string("private.der"), isSecret: false),
+                    ]
+                )
+                let config = ConfigReader(provider: provider)
+                let snapshot = config.snapshot()
+
+                let transportSecurity = try NIOHTTPServerConfiguration.TransportSecurity(config: snapshot)
+
+                guard case .tls(let credentials) = transportSecurity.backing else {
+                    Issue.record("Expected TLS transport security, got \(transportSecurity.backing) instead.")
+                    return
+                }
+
+                guard case .rawPublicKey(let rpkCredentials) = credentials.backing else {
+                    Issue.record("Expected raw public key TLS credentials, got \(credentials.backing) instead.")
+                    return
+                }
+
+                switch rpkCredentials.backing {
+                case .file(let publicKey, let privateKey, let format):
+                    #expect(format == .der)
+                    #expect(publicKey == "public.der")
+                    #expect(privateKey == "private.der")
+                }
+            }
+            #endif  // HTTP3
 
             @Test("Init fails with missing certificate")
             @available(anyAppleOS 26.0, *)
@@ -827,7 +870,9 @@ struct NIOHTTPServerSwiftConfigurationTests {
                     return
                 }
 
-                guard case .inMemory(let certificateChain, let privateKey) = tlsCredentials.backing else {
+                guard case .x509(let x509Credentials) = tlsCredentials.backing,
+                    case .certificates(let certificateChain, let privateKey) = x509Credentials.backing
+                else {
                     Issue.record("Expected in-memory TLS credentials, got \(tlsCredentials.backing) instead.")
                     return
                 }
@@ -835,9 +880,9 @@ struct NIOHTTPServerSwiftConfigurationTests {
                 #expect(certificateChain == [serverChain.leaf, serverChain.ca])
                 #expect(privateKey == serverChain.privateKey)
 
-                guard case .customCertificateVerificationCallback = mTLSTrustConfiguration.backing else {
+                guard case .customCertificateVerificationCallback = mTLSTrustConfiguration.source.backing else {
                     Issue.record(
-                        "Expected a custom verification callback, got \(mTLSTrustConfiguration.backing) instead."
+                        "Expected a custom verification callback, got \(mTLSTrustConfiguration.source.backing) instead."
                     )
                     return
                 }
@@ -872,7 +917,9 @@ struct NIOHTTPServerSwiftConfigurationTests {
                     return
                 }
 
-                guard case .inMemory(let certificateChain, let privateKey) = tlsCredentials.backing else {
+                guard case .x509(let x509Credentials) = tlsCredentials.backing,
+                    case .certificates(let certificateChain, let privateKey) = x509Credentials.backing
+                else {
                     Issue.record("Expected in-memory TLS credentials, got \(tlsCredentials.backing) instead.")
                     return
                 }
@@ -880,8 +927,10 @@ struct NIOHTTPServerSwiftConfigurationTests {
                 #expect(certificateChain == [serverChain.leaf, serverChain.ca])
                 #expect(privateKey == serverChain.privateKey)
 
-                guard case .systemDefaults = mTLSTrustConfiguration.backing else {
-                    Issue.record("Expected system default trust roots, got \(mTLSTrustConfiguration.backing) instead.")
+                guard case .systemDefaults = mTLSTrustConfiguration.source.backing else {
+                    Issue.record(
+                        "Expected system default trust roots, got \(mTLSTrustConfiguration.source.backing) instead."
+                    )
                     return
                 }
                 #expect(mTLSTrustConfiguration.certificateVerification.mode == .optionalVerification)
@@ -946,7 +995,9 @@ struct NIOHTTPServerSwiftConfigurationTests {
                     return
                 }
 
-                guard case .inMemory(let certificateChain, let privateKey) = tlsCredentials.backing else {
+                guard case .x509(let x509Credentials) = tlsCredentials.backing,
+                    case .certificates(let certificateChain, let privateKey) = x509Credentials.backing
+                else {
                     Issue.record("Expected in-memory TLS credentials, got \(tlsCredentials.backing) instead.")
                     return
                 }
@@ -954,8 +1005,10 @@ struct NIOHTTPServerSwiftConfigurationTests {
                 #expect(certificateChain == [serverChain.leaf, serverChain.ca])
                 #expect(privateKey == serverChain.privateKey)
 
-                guard case .systemDefaults = mTLSTrustConfiguration.backing else {
-                    Issue.record("Expected system default trust roots, got \(mTLSTrustConfiguration.backing) instead.")
+                guard case .systemDefaults = mTLSTrustConfiguration.source.backing else {
+                    Issue.record(
+                        "Expected system default trust roots, got \(mTLSTrustConfiguration.source.backing) instead."
+                    )
                     return
                 }
             }
@@ -989,9 +1042,9 @@ struct NIOHTTPServerSwiftConfigurationTests {
                     return
                 }
 
-                guard case .pemFile(let path) = mTLSTrustConfiguration.backing else {
+                guard case .serialized(.file(let path, .pem)) = mTLSTrustConfiguration.source.backing else {
                     Issue.record(
-                        "Expected pemFile trust configuration, got \(mTLSTrustConfiguration.backing) instead."
+                        "Expected pemFile trust configuration, got \(mTLSTrustConfiguration.source.backing) instead."
                     )
                     return
                 }
@@ -1031,13 +1084,17 @@ struct NIOHTTPServerSwiftConfigurationTests {
                     return
                 }
 
-                guard case .reloading = tlsCredentials.backing else {
+                guard case .x509(let x509Credentials) = tlsCredentials.backing,
+                    case .reloading = x509Credentials.backing
+                else {
                     Issue.record("Expected reloading TLS credentials, got \(tlsCredentials.backing) instead.")
                     return
                 }
 
-                guard case .inMemory(let trustRoots) = mTLSTrustConfiguration.backing else {
-                    Issue.record("Expected in-memory trust roots, got \(mTLSTrustConfiguration.backing) instead.")
+                guard case .certificates(let trustRoots) = mTLSTrustConfiguration.source.backing else {
+                    Issue.record(
+                        "Expected in-memory trust roots, got \(mTLSTrustConfiguration.source.backing) instead."
+                    )
                     return
                 }
                 #expect(trustRoots == [chain.ca])
@@ -1101,13 +1158,15 @@ struct NIOHTTPServerSwiftConfigurationTests {
                 return
             }
 
-            guard case .inMemory(let certificateChain, let privateKey) = tlsCredentials.backing else {
+            guard case .x509(let x509Credentials) = tlsCredentials.backing,
+                case .certificates(let certificateChain, let privateKey) = x509Credentials.backing
+            else {
                 Issue.record("Expected in-memory TLS credentials, got \(tlsCredentials.backing) instead.")
                 return
             }
 
-            guard case .inMemory(let trustRoots) = trustConfig.backing else {
-                Issue.record("Expected in-memory trust roots, got \(trustConfig.backing) instead.")
+            guard case .certificates(let trustRoots) = trustConfig.source.backing else {
+                Issue.record("Expected in-memory trust roots, got \(trustConfig.source.backing) instead.")
                 return
             }
 

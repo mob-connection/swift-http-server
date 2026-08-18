@@ -36,29 +36,13 @@ struct NIOHTTPServerEndToEndTests {
                     try await outbound.write(.head(.init(method: .get, scheme: "", authority: "", path: "/")))
                     try await outbound.write(.end(nil))
 
-                    var inboundIterator = inbound.makeAsyncIterator()
-
-                    let head = try await inboundIterator.next()
-                    guard case .head(let responseHead) = head else {
-                        Issue.record("Expected response head but received \(head).")
-                        return
-                    }
-                    #expect(responseHead.status == 200)
-                    #expect(responseHead.headerFields == [.transferEncoding: "chunked"])
-
-                    let body = try await inboundIterator.next()
-                    guard case .body(let responseBody) = body else {
-                        Issue.record("Expected response body but received \(body).")
-                        return
-                    }
-                    #expect(responseBody == .init([1, 2]))
-
-                    let end = try await inboundIterator.next()
-                    guard case .end(let responseEnd) = end else {
-                        Issue.record("Expected response end but received \(end).")
-                        return
-                    }
-                    #expect(responseEnd == [.serverTiming: "test"])
+                    try await TestHelpers.validateResponse(
+                        inbound,
+                        expectedHead: [.makeResponse(status: .ok, for: .http1_1)],
+                        expectedBody: [.init([1, 2])],
+                        expectedTrailers: [.serverTiming: "test"],
+                        expectStreamEnd: false
+                    )
                 }
             }
         }
@@ -69,60 +53,36 @@ struct NIOHTTPServerEndToEndTests {
     func testHTTP2Negotiation() async throws {
         let serverChain = try TestCA.makeSelfSignedChain()
         var clientTLSConfig = TLSConfiguration.makeClientConfiguration()
-        clientTLSConfig.trustRoots = try .init(treatingNilAsSystemTrustRoots: [serverChain.ca])
+        clientTLSConfig.trustRoots = try .certificates([serverChain.ca])
         clientTLSConfig.certificateVerification = .noHostnameVerification
         clientTLSConfig.applicationProtocols = ["http/1.1", "h2"]
 
         try await TestingChannelSecureUpgradeServer.serve(
             logger: Logger(label: "NIOHTTPServerEndToEndTests"),
             transportSecurity: .tls(
-                credentials: .inMemory(
-                    certificateChain: serverChain.chain,
-                    privateKey: serverChain.privateKey
-                )
+                credentials: .x509(.certificates(chain: serverChain.chain, privateKey: serverChain.privateKey))
             ),
-            supportedHTTPVersions: [.http1_1, .http2(config: .defaults)],
+            supportedHTTPVersions: [.http1_1, .http2],
             handler: HTTPServerClosureRequestHandler { request, reqContext, reqReader, resSender in
                 var buffer = UniqueArray<UInt8>(copying: [1, 2])
                 try await resSender.sendAndFinish(.init(status: .ok), buffer: &buffer, trailer: [.serverTiming: "test"])
             }
         ) { server in
-            try await server.withConnectedClient(clientTLSConfig: clientTLSConfig) { negotiatedConnectionChannel in
-                switch negotiatedConnectionChannel {
-                case .http1(_):
-                    Issue.record("Failed to negotiate HTTP/2 despite the client requiring HTTP/2.")
-
-                case .http2(let http2StreamManager):
-                    let http2AsyncChannel = try await http2StreamManager.openStream()
-
-                    try await http2AsyncChannel.executeThenClose { inbound, outbound in
+            try await server.withConnectedClient(clientTLSConfig: clientTLSConfig) { negotiatedConnection in
+                try await negotiatedConnection
+                    .makeRequestChannel(expectedHTTPVersion: .http2)
+                    .executeThenClose { inbound, outbound in
                         try await outbound.write(.head(.init(method: .get, scheme: "", authority: "", path: "/")))
                         try await outbound.write(.end(nil))
 
-                        var inboundIterator = inbound.makeAsyncIterator()
-
-                        let head = try await inboundIterator.next()
-                        guard case .head(let responseHead) = head else {
-                            Issue.record("Expected response head but received \(head).")
-                            return
-                        }
-                        #expect(responseHead.status == 200)
-
-                        let body = try await inboundIterator.next()
-                        guard case .body(let responseBody) = body else {
-                            Issue.record("Expected response body but received \(body).")
-                            return
-                        }
-                        #expect(responseBody == .init([1, 2]))
-
-                        let end = try await inboundIterator.next()
-                        guard case .end(let responseEnd) = end else {
-                            Issue.record("Expected response end but received \(end).")
-                            return
-                        }
-                        #expect(responseEnd == [.serverTiming: "test"])
+                        try await TestHelpers.validateResponse(
+                            inbound,
+                            expectedHead: [.makeResponse(status: .ok, for: .http2)],
+                            expectedBody: [.init([1, 2])],
+                            expectedTrailers: [.serverTiming: "test"],
+                            expectStreamEnd: true
+                        )
                     }
-                }
             }
         }
     }

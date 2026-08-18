@@ -215,19 +215,16 @@ extension NIOHTTPServer {
 
     func setupSecureUpgradeServerChannels(
         bindTargets: [NIOHTTPServerConfiguration.BindTarget],
-        supportedHTTPVersions: Set<NIOHTTPServerConfiguration.HTTPVersion>,
+        http2Configuration: NIOHTTPServerConfiguration.HTTP2?,
         sslContext: NIOSSLContext
     ) async throws -> [(NIOAsyncChannel<EventLoopFuture<NegotiatedChannel>, Never>, ServerQuiescingHelper)] {
-        let bootstrap = ServerBootstrap(group: self.eventLoopGroup)
-            .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
-
         var serverChannels = [(NIOAsyncChannel<EventLoopFuture<NegotiatedChannel>, Never>, ServerQuiescingHelper)]()
         do {
             for bindTarget in bindTargets {
                 let serverQuiescingHelper = ServerQuiescingHelper(group: self.eventLoopGroup)
-                switch bindTarget.backing {
-                case .hostAndPort(let host, let port):
-                    let serverChannel = try await bootstrap.serverChannelInitializer { channel in
+                let bootstrap = ServerBootstrap(group: self.eventLoopGroup)
+                    .serverChannelOption(.socketOption(.so_reuseaddr), value: 1)
+                    .serverChannelInitializer { channel in
                         channel.eventLoop.makeCompletedFuture {
                             try channel.pipeline.syncOperations.addHandler(
                                 serverQuiescingHelper.makeServerChannelHandler(channel: channel)
@@ -239,36 +236,15 @@ extension NIOHTTPServer {
                                 )
                             }
                         }
-                    }.bind(host: host, port: port) { channel in
-                        self.setupSecureUpgradeConnectionChildChannel(
-                            channel: channel,
-                            supportedHTTPVersions: supportedHTTPVersions,
-                            sslContext: sslContext
-                        )
                     }
-                    serverChannels.append((serverChannel, serverQuiescingHelper))
-                case .unixDomainSocket(let path):
-                    let serverChannel = try await bootstrap.serverChannelInitializer { channel in
-                        channel.eventLoop.makeCompletedFuture {
-                            try channel.pipeline.syncOperations.addHandler(
-                                serverQuiescingHelper.makeServerChannelHandler(channel: channel)
-                            )
-
-                            if let maxConnections = self.configuration.maxConnections {
-                                try channel.pipeline.syncOperations.addHandler(
-                                    ConnectionLimitHandler(maxConnections: maxConnections)
-                                )
-                            }
-                        }
-                    }.bind(unixDomainSocketPath: path.string) { channel in
-                        self.setupSecureUpgradeConnectionChildChannel(
-                            channel: channel,
-                            supportedHTTPVersions: supportedHTTPVersions,
-                            sslContext: sslContext
-                        )
-                    }
-                    serverChannels.append((serverChannel, serverQuiescingHelper))
+                let serverChannel = try await ServerBootstrap.bind(bootstrap, to: bindTarget) { channel in
+                    self.setupSecureUpgradeConnectionChildChannel(
+                        channel: channel,
+                        http2Configuration: http2Configuration,
+                        sslContext: sslContext
+                    )
                 }
+                serverChannels.append((serverChannel, serverQuiescingHelper))
             }
         } catch {
             // A later bind failed: close any channels we already bound to avoid leaking sockets.
@@ -312,7 +288,8 @@ extension NIOHTTPServer {
 
                         // Add read header and body timeouts per-stream for HTTP/2
                         try http2StreamChannel.pipeline.syncOperations.addReadTimeoutHandlers(
-                            self.configuration.connectionTimeouts
+                            self.configuration.connectionTimeouts,
+                            expectMultipleRequests: false
                         )
 
                         return try NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>(
@@ -333,31 +310,19 @@ extension NIOHTTPServer {
 
     func setupSecureUpgradeConnectionChildChannel(
         channel: any Channel,
-        supportedHTTPVersions: Set<NIOHTTPServerConfiguration.HTTPVersion>,
+        http2Configuration: NIOHTTPServerConfiguration.HTTP2?,
         sslContext: NIOSSLContext
     ) -> EventLoopFuture<EventLoopFuture<NegotiatedChannel>> {
         channel.eventLoop.makeCompletedFuture {
-            try channel.pipeline.syncOperations.addHandler(
-                self.makeSSLServerHandler(
-                    sslContext,
-                    self.configuration.transportSecurity.customVerificationCallback
-                )
+            let sslHandler = self.makeSSLServerHandler(
+                sslContext,
+                self.configuration.transportSecurity.customVerificationCallback
             )
-        }.flatMap {
-            channel.eventLoop.makeCompletedFuture {
-                let alpnHandler = self.makeALPNHandler(
-                    channel: channel,
-                    http2Config: supportedHTTPVersions.http2ConfigIfSupported
-                )
+            let alpnHandler = self.makeALPNHandler(channel: channel, http2Config: http2Configuration)
 
-                do {
-                    try channel.pipeline.syncOperations.addHandler(alpnHandler)
-                } catch {
-                    return channel.eventLoop.makeFailedFuture(error)
-                }
+            try channel.pipeline.syncOperations.addHandlers([sslHandler, alpnHandler])
 
-                return alpnHandler.protocolNegotiationResult
-            }
+            return alpnHandler.protocolNegotiationResult
         }
     }
 
