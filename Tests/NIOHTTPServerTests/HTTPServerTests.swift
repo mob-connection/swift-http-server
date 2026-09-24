@@ -99,7 +99,9 @@ struct HTTPServerTests {
             group.cancelAll()
         }
 
-        // The task group only returns once `serve` has fully unwound, including its cleanup `defer`.
+        // The task group only returns once `serve` has fully unwound, so every listening socket has been closed.
+        // Closing a bound unix domain socket is what removes the socket file: NIO's `ServerSocket` unlinks the path
+        // on close, so the server does not have to unlink it itself.
         #expect(!FileManager.default.fileExists(atPath: socketPath))
     }
 
@@ -126,7 +128,8 @@ struct HTTPServerTests {
             try await server.serve { _, _, _, _ in }
         }
 
-        // The pre-existing file must be left untouched: cleanup only runs for sockets we bound ourselves.
+        // The pre-existing file must be left untouched: the bind never succeeded, so there is no socket of ours to
+        // close, and nothing removes a path this server did not bind.
         #expect(FileManager.default.fileExists(atPath: socketPath))
     }
 }

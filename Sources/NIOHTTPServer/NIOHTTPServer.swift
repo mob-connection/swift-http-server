@@ -607,24 +607,6 @@ extension ServerBootstrap {
 
 @available(anyAppleOS 26.0, *)
 extension NIOHTTPServer {
-    /// Removes the socket file backing `address`, if `address` is a unix domain socket address.
-    ///
-    /// Failing to remove the file is not fatal to the server: it only leaves the path occupied, so the error is
-    /// logged and swallowed.
-    func removeSocketFile(boundTo address: NIOCore.SocketAddress) async {
-        guard let path = address.pathname else { return }
-
-        do {
-            try await NonBlockingFileIO(threadPool: .singleton).unlink(path: path)
-        } catch {
-            self.logger.debug(
-                "Failed to remove unix domain socket file",
-                error: error,
-                metadata: ["path": "\(path)"]
-            )
-        }
-    }
-
     /// Awaits the next address from `iterator`.
     func nextBoundAddress(
         from iterator: inout sending AsyncThrowingStream<NIOCore.SocketAddress, any Error>.AsyncIterator
@@ -640,6 +622,8 @@ extension NIOHTTPServer {
     ///
     /// - Note: The bind address is yielded to the provided `addressContinuation` immediately after the TCP socket has
     ///   been bound.
+    /// - Note: For a unix domain socket address, closing the socket also removes the socket file: `ServerSocket`
+    ///   cleans the path up on close, so the path is free for the next bind without this server unlinking it.
     func withTCPChannel<Child: Sendable>(
         address: NIOCore.SocketAddress,
         addressContinuation: AsyncThrowingStream<NIOCore.SocketAddress, any Error>.Continuation,
@@ -658,10 +642,6 @@ extension NIOHTTPServer {
             addressContinuation.finish(throwing: error)
             throw error
         }
-
-        // Binding a unix domain socket creates the socket file: remove it once this listener is done, so the path is
-        // free for the next run. Registered only after the bind succeeded, so the file is one this server created.
-        defer { await self.removeSocketFile(boundTo: address) }
 
         try await withTaskCancellationHandler {
             try await withGracefulShutdownHandler {
