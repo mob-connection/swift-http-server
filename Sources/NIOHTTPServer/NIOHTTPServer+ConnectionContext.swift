@@ -19,7 +19,8 @@ public import X509
 @available(anyAppleOS 26.0, *)
 extension NIOHTTPServer {
     /// The application-level HTTP version negotiated for a connection.
-    public enum HTTPVersion: String, Sendable, Hashable {
+    @nonexhaustive
+    public enum HTTPVersion: String, Sendable, Hashable, CaseIterable {
         case plaintextHTTP1_1 = "Plaintext HTTP/1.1"
         case http1_1 = "HTTP/1.1"
         case http2 = "HTTP/2"
@@ -52,31 +53,21 @@ extension NIOHTTPServer {
         /// The local address the connection is bound to, when known.
         public let localAddress: NIOHTTPServer.SocketAddress?
 
-        var peerCertificateChainFuture: EventLoopFuture<NIOSSL.ValidatedCertificateChain?>?
+        /// The peer's validated certificate chain. Returns `nil` if a custom verification callback was not set when
+        /// configuring mTLS in the server configuration, or if the custom verification callback did not return the
+        /// derived validated chain.
+        public var validatedPeerCertificateChain: X509.ValidatedCertificateChain?
 
         init(
             httpVersion: HTTPVersion,
             remoteAddress: NIOHTTPServer.SocketAddress? = nil,
             localAddress: NIOHTTPServer.SocketAddress? = nil,
-            peerCertificateChainFuture: EventLoopFuture<NIOSSL.ValidatedCertificateChain?>? = nil
+            validatedPeerCertificateChain: X509.ValidatedCertificateChain? = nil
         ) {
             self.httpVersion = httpVersion
             self.remoteAddress = remoteAddress
             self.localAddress = localAddress
-            self.peerCertificateChainFuture = peerCertificateChainFuture
-        }
-
-        /// The peer's validated certificate chain. Returns `nil` if a custom
-        /// verification callback was not set when configuring mTLS in the
-        /// server configuration, or if the custom verification callback did not
-        /// return the derived validated chain.
-        public var peerCertificateChain: X509.ValidatedCertificateChain? {
-            get async throws {
-                if let certs = try await self.peerCertificateChainFuture?.get() {
-                    return .init(uncheckedCertificateChain: try certs.map { try Certificate($0) })
-                }
-                return nil
-            }
+            self.validatedPeerCertificateChain = validatedPeerCertificateChain
         }
     }
 }

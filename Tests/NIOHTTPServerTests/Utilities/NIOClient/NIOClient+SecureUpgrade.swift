@@ -66,7 +66,7 @@ extension ClientBootstrap {
             target = try NIOCore.SocketAddress(ipAddress: address.host, port: address.port)
         case .ipv6(let address):
             target = try NIOCore.SocketAddress(ipAddress: address.host, port: address.port)
-        case .unixDomainSocket(path: let path):
+        case .unixDomainSocket(let path):
             target = try NIOCore.SocketAddress(unixDomainSocketPath: path)
         }
 

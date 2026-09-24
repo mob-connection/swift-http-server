@@ -33,29 +33,26 @@ extension NIOHTTPServer {
     public struct Connection: ~Copyable, Sendable {
         /// Per-protocol state.
         ///
-        /// - `http1_1` carries the request-channel's already-running inbound stream and outbound writer (the dispatcher
-        ///   owns the channel and drives `executeThenClose`, so the writer is finished cleanly even if the connection
-        ///   handler returns without calling ``handleRequests(handler:)``).
+        /// - `http1_1` carries the request channel plus its already-running inbound stream and outbound writer (the
+        ///   dispatcher owns the channel and drives `executeThenClose`, so the writer is finished cleanly even if the
+        ///   connection handler returns without calling ``handleRequests(handler:)``).
         /// - `http2` carries the connection channel and stream multiplexer.
         /// - `http3` carries an ``HTTP3ServerConnection``.
         enum HTTPProtocol: Sendable {
             case http1_1(
+                channel: any Channel,
                 inbound: NIOAsyncChannelInboundStream<HTTPRequestPart>,
-                outbound: NIOAsyncChannelOutboundWriter<HTTPResponsePart>
+                outbound: NIOAsyncChannelOutboundWriter<HTTPResponsePart>,
+                clientClosed: AsyncStream<Void>
             )
 
             case http2(
                 connectionChannel: any Channel,
-                multiplexer: NIOHTTP2Handler.AsyncStreamMultiplexer<NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>>
+                multiplexer: NIOHTTP2Handler.AsyncStreamMultiplexer<HTTPRequestChannelAndCancellationSignal>
             )
 
             #if HTTP3
-            case http3(
-                connection: HTTP3ServerConnection<
-                    NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>,
-                    NIOQUIC.QUICStreamCreator
-                >
-            )
+            case http3(connection: HTTP3ServerConnection<NIOHTTPServer.HTTP3Stream, NIOQUIC.QUICStreamCreator>)
             #endif
         }
 
@@ -74,6 +71,12 @@ extension NIOHTTPServer {
         /// Each request received on this connection is dispatched to `handler`. The
         /// loop returns when the peer closes the connection, the server shuts down,
         /// or an error occurs.
+        ///
+        /// A handler reports a failure by throwing. The error is not propagated out of this method: it aborts the
+        /// exchange carrying that request on the wire, closing the connection over HTTP/1.1, or resetting the stream
+        /// over HTTP/2 and HTTP/3. Conform the error to ``HTTPServerHTTP2StreamResetErrorConvertible`` and
+        /// ``HTTPServerHTTP3StreamResetErrorConvertible`` as appropriate to choose the protocol error codes; see
+        /// ``NIOHTTPServer/serve(handler:)`` for the full description.
         public consuming func handleRequests<Handler: HTTPServerRequestHandler>(
             handler: Handler
         ) async
@@ -85,12 +88,14 @@ extension NIOHTTPServer {
             let server = self.server
             let context = self.context
             switch self.httpProtocol {
-            case .http1_1(let inbound, let outbound):
+            case .http1_1(let channel, let inbound, let outbound, let clientClosed):
                 await server.handleHTTP1RequestLoop(
+                    channel: channel,
                     inbound: inbound,
                     outbound: outbound,
                     handler: handler,
-                    context: context
+                    context: context,
+                    signalledBy: clientClosed
                 )
 
             case .http2(let connectionChannel, let multiplexer):
@@ -110,6 +115,9 @@ extension NIOHTTPServer {
 
         /// Convenience overload accepting a closure instead of a
         /// ``HTTPServerRequestHandler`` conformance.
+        ///
+        /// Throwing from the closure aborts the exchange carrying that request on the wire rather than propagating the
+        /// error; see ``handleRequests(handler:)``.
         ///
         /// ```swift
         /// try await server.serve { connection, context in

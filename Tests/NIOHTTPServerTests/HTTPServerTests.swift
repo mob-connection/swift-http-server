@@ -16,8 +16,8 @@ import BasicContainers
 import Foundation
 import Logging
 import NIOHTTPServer
-import Testing
 import System
+import Testing
 
 @Suite
 struct HTTPServerTests {

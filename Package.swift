@@ -101,13 +101,14 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-certificates.git", from: "1.19.3"),
         .package(url: "https://github.com/apple/swift-log.git", from: "1.14.0"),
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.101.3"),
-        .package(url: "https://github.com/apple/swift-nio-quic.git", .upToNextMinor(from: "0.2.1")),
+        .package(url: "https://github.com/apple/swift-nio-quic.git", .upToNextMinor(from: "0.2.2")),
         .package(url: "https://github.com/apple/swift-nio-quic-helpers.git", .upToNextMinor(from: "0.1.0")),
-        .package(url: "https://github.com/apple/swift-nio-http3.git", .upToNextMinor(from: "0.2.0")),
+        // TODO: Update once datagram APIs are released.
+        .package(url: "https://github.com/apple/swift-nio-http3.git", branch: "main"),
         .package(url: "https://github.com/apple/swift-nio-ssl.git", from: "2.37.0"),
-        .package(url: "https://github.com/apple/swift-nio-extras.git", from: "1.34.1"),
+        .package(url: "https://github.com/apple/swift-nio-extras.git", from: "1.35.1"),
         .package(url: "https://github.com/apple/swift-nio-http2.git", from: "1.44.0"),
-        .package(url: "https://github.com/apple/swift-configuration.git", from: "1.2.0"),
+        .package(url: "https://github.com/apple/swift-configuration.git", from: "1.2.0", traits: []),
         .package(url: "https://github.com/swift-server/swift-service-lifecycle.git", from: "2.11.0"),
     ],
     targets: [
@@ -124,6 +125,17 @@ let package = Package(
                 "ExampleSupport",
                 .product(name: "Instrumentation", package: "swift-distributed-tracing"),
                 .product(name: "Logging", package: "swift-log"),
+                "NIOHTTPServer",
+            ],
+            swiftSettings: extraSettings
+        ),
+        .executableTarget(
+            name: "StreamResetExample",
+            dependencies: [
+                "ExampleSupport",
+                .product(name: "Logging", package: "swift-log"),
+                .product(name: "NIOHTTP2", package: "swift-nio-http2"),
+                .product(name: "NIOHTTP3", package: "swift-nio-http3", condition: .when(traits: ["HTTP3"])),
                 "NIOHTTPServer",
             ],
             swiftSettings: extraSettings

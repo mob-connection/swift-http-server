@@ -33,7 +33,7 @@ extension NIOHTTPServer {
     {
         // The server requires a NIOAsyncChannel, so we create one from the test channel
         let serverTestAsyncChannel = try await testChannel.eventLoop.submit {
-            try NIOAsyncChannel<NIOAsyncChannel<HTTPRequestPart, HTTPResponsePart>, Never>(
+            try NIOAsyncChannel<HTTPRequestChannelAndCancellationSignal, Never>(
                 wrappingChannelSynchronously: testChannel,
                 configuration: .init()
             )
@@ -45,9 +45,11 @@ extension NIOHTTPServer {
         try self.addressesBound([.init(ipAddress: "127.0.0.1", port: 8000)])
         _ = try await self.listeningAddresses
 
-        try await self.serveInsecureHTTP1_1(
-            serverChannel: serverTestAsyncChannel,
-            connectionHandler: NIOHTTPServerDefaultConnectionHandler(handler: handler)
-        )
+        try await serverTestAsyncChannel.executeThenClose { inbound in
+            try await self.serveInsecureHTTP1_1(
+                connectionStream: inbound,
+                connectionHandler: NIOHTTPServerDefaultConnectionHandler(handler: handler)
+            )
+        }
     }
 }
