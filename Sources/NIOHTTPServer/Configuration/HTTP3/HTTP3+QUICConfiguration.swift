@@ -15,7 +15,7 @@
 #if HTTP3
 import NIOQUIC
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension NIOHTTPServerConfiguration.HTTP3 {
     /// QUIC transport configuration for an HTTP/3 server.
     public struct QUICConfiguration: Sendable, Hashable {
@@ -159,6 +159,16 @@ extension NIOHTTPServerConfiguration.HTTP3 {
         /// debugging and analysis.
         public var qLogConfiguration: QLogConfiguration?
 
+        /// Builds the datagram socket group for each HTTP/3 bind target, or `nil` to bind a single socket per
+        /// bind target.
+        ///
+        /// The server consults this once per bind target, passing the number of available event loops.
+        ///
+        /// - Note: A closure has no representation in a configuration file. Build the configuration from a
+        ///   `ConfigProvider` and then set this property on it.
+        @_spi(QUICDatagramSockets)
+        public var datagramSocketGroupFactory: QUICDatagramSocketGroupFactory? = nil
+
         /// The default QUIC transport configuration.
         ///
         /// Uses the following default values:
@@ -196,7 +206,7 @@ extension NIOHTTPServerConfiguration.HTTP3 {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension NIOQUIC.QUICConfiguration.QLogConfiguration {
     fileprivate init(_ configuration: NIOHTTPServerConfiguration.HTTP3.QUICConfiguration.QLogConfiguration) {
         self.init(
@@ -207,7 +217,7 @@ extension NIOQUIC.QUICConfiguration.QLogConfiguration {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension NIOQUIC.KeyExchangeGroup {
     fileprivate init(_ configuration: NIOHTTPServerConfiguration.HTTP3.QUICConfiguration.KeyExchangeGroup) {
         switch configuration.backing {
@@ -226,7 +236,7 @@ extension NIOQUIC.KeyExchangeGroup {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension NIOQUIC.AuthenticationConfiguration {
     init(_ tlsCredentials: NIOHTTPServerConfiguration.TransportSecurity.TLSCredentials) throws {
         switch tlsCredentials.backing {
@@ -251,7 +261,7 @@ extension NIOQUIC.AuthenticationConfiguration {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension NIOQUIC.QUICConfiguration {
     /// Creates a `NIOQUIC.QUICConfiguration` from a `NIOHTTPServerConfiguration.HTTP3.QUICConfiguration` instance.
     init(
@@ -292,7 +302,7 @@ extension NIOQUIC.QUICConfiguration {
     #endif  // UnstableHTTPDatagrams
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension NIOQUIC.Authenticator {
     /// Creates an `Authenticator` instance from X.509 TLS credentials.
     ///

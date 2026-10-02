@@ -22,7 +22,7 @@ import Testing
 @Suite
 struct HTTPServerTests {
     @Test
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     func testConsumingServe() async throws {
         let server = NIOHTTPServer(
             configuration: try .init(
@@ -63,7 +63,7 @@ struct HTTPServerTests {
     }
 
     @Test("Unix domain socket file is removed on shutdown")
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     func testUnixDomainSocketFileRemovedOnShutdown() async throws {
         // Keep the path short so it stays under the platform's `sun_path` limit (104 on Darwin, 108 on Linux),
         // even on CI where the system temporary directory can be deep.
@@ -106,7 +106,7 @@ struct HTTPServerTests {
     }
 
     @Test("Bind fails when the unix domain socket path is already occupied")
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     func testUnixDomainSocketBindFailsWhenPathExists() async throws {
         let socketPath = "/tmp/nio-http-server-uds-\(UUID().uuidString).sock"
         // Simulate a leftover/occupied socket by pre-creating a file at the path.

@@ -106,7 +106,7 @@ extension TLSConfiguration {
     }
 
     /// Like ``makeTestClientConfiguration``, but with mTLS.
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     static func makeTestClientMTLSConfiguration(
         testTrustRoots: NIOSSLTrustRoots,
         clientChain: ChainPrivateKeyPair,
@@ -124,7 +124,7 @@ extension TLSConfiguration {
 }
 
 #if HTTP3
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension QUICConfiguration {
     /// Creates a client QUIC configuration.
     ///
@@ -144,7 +144,7 @@ extension QUICConfiguration {
 }
 #endif
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 struct TestHelpers {
     /// Starts `server` with `serverHandler`, waits for it to begin listening, runs `body` with the first
     /// listening address, then cancels the server task.
@@ -192,7 +192,14 @@ struct TestHelpers {
                 try await server.serve(handler: serverHandler)
             }
 
-            let listeningAddresses = try await server.listeningAddresses
+            let listeningAddresses: [NIOHTTPServer.SocketAddress]
+            do {
+                listeningAddresses = try await server.listeningAddresses
+            } catch {
+                // Rethrow the error from `serve()`, which the listening address promise does not carry.
+                try await group.waitForAll()
+                throw error
+            }
 
             try await body(listeningAddresses)
 
@@ -212,7 +219,14 @@ struct TestHelpers {
                 try await server.serve(connectionHandler: connectionHandler)
             }
 
-            let listeningAddresses = try await server.listeningAddresses
+            let listeningAddresses: [NIOHTTPServer.SocketAddress]
+            do {
+                listeningAddresses = try await server.listeningAddresses
+            } catch {
+                // Rethrow the error from `serve()`, which the listening address promise does not carry.
+                try await group.waitForAll()
+                throw error
+            }
 
             try await body(listeningAddresses)
 
@@ -396,7 +410,7 @@ struct TestHelpers {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension TestHelpers {
     static func makeTLSServerConfiguration(
         supportedHTTPVersions: Set<NIOHTTPServerConfiguration.HTTPVersion> = [.http1_1, .http2],
@@ -535,7 +549,7 @@ extension TestHelpers {
     #endif  // HTTP3 && UnstableHTTPDatagrams
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension HTTPFields {
     /// Returns the body encoding header fields required for the given HTTP version.
     static func makeBodyEncodingHeaders(for httpVersion: NIOHTTPServer.HTTPVersion) -> HTTPFields {
@@ -554,7 +568,7 @@ extension HTTPFields {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension String {
     static func makeScheme(for httpVersion: NIOHTTPServer.HTTPVersion) -> String {
         switch httpVersion {
@@ -572,7 +586,7 @@ extension String {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension HTTPRequest {
     /// Creates an ``HTTPRequest`` with the appropriate headers for the given `httpVersion`.
     static func makeRequest(
@@ -591,7 +605,7 @@ extension HTTPRequest {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension HTTPResponse {
     /// Creates an ``HTTPResponse`` with the given status and the appropriate headers for the given `httpVersion`.
     static func makeResponse(
@@ -605,7 +619,7 @@ extension HTTPResponse {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension HTTPRequestPart {
     static func testHead(
         method: HTTPRequest.Method,

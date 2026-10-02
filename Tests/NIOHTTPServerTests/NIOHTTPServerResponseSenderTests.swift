@@ -22,7 +22,7 @@ import Testing
 @Suite
 struct NIOHTTPServerResponseSenderTests {
     @Test("Informational header without informational status code")
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     func testInformationalResponseStatusCodePrecondition() async throws {
         // Sending an informational header with a non-1xx status code shouldn't be allowed
         try await #require(processExitsWith: .failure) {
@@ -34,7 +34,7 @@ struct NIOHTTPServerResponseSenderTests {
     }
 
     @Test("Multiple informational responses before final response")
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     func testSendMultipleInformationalResponses() async throws {
         let (outboundWriter, sink) = NIOAsyncChannelOutboundWriter<HTTPResponsePart>.makeTestingWriter()
         var sender = NIOHTTPServer.ResponseSender(writer: outboundWriter, writerState: .init())
@@ -65,5 +65,60 @@ struct NIOHTTPServerResponseSenderTests {
         #expect(finalHead == .head(finalResponseHead))
         #expect(body == .body(ByteBuffer(bytes: finalResponseBody)))
         #expect(trailer == .end(finalResponseTrailer))
+    }
+
+    @Test("Buffered response drains its input and concludes the writer", arguments: [0, 2, 65536], [false, true])
+    @available(anyAppleOS 27.0, *)
+    func testBufferedResponse(byteCount: Int, includeTrailers: Bool) async throws {
+        let (outboundWriter, sink) = NIOAsyncChannelOutboundWriter<HTTPResponsePart>.makeTestingWriter()
+        let state = NIOHTTPServer.ResponseSender.WriterState()
+        let sender = NIOHTTPServer.ResponseSender(writer: outboundWriter, writerState: state)
+        let response = HTTPResponse(status: .ok)
+        let trailers: HTTPFields? = includeTrailers ? [.serverTiming: "test"] : nil
+        var buffer = UniqueArray<UInt8>(copying: [UInt8](repeating: 97, count: byteCount))
+
+        #expect(!state.wrapped.withLock { $0.finishedWriting })
+        try await sender.sendAndFinish(response, buffer: &buffer, trailer: trailers)
+        let drained = buffer.isEmpty
+        #expect(drained)
+        #expect(state.wrapped.withLock { $0.finishedWriting })
+
+        var iterator = sink.makeAsyncIterator()
+        #expect(await iterator.next() == .head(response))
+        if byteCount > 0 {
+            #expect(await iterator.next() == .body(ByteBuffer(repeating: 97, count: byteCount)))
+        }
+        #expect(await iterator.next() == .end(trailers))
+    }
+
+    @Test("Buffered response through the protocol requirement")
+    @available(anyAppleOS 27.0, *)
+    func testBufferedResponseThroughProtocol() async throws {
+        func send<Sender: HTTPResponseSender & ~Copyable>(_ sender: consuming Sender) async throws
+        where Sender.Writer: ~Copyable {
+            var buffer = UniqueArray<UInt8>(copying: [1, 2, 3])
+            try await sender.sendAndFinish(.init(status: .ok), buffer: &buffer, trailer: nil)
+            let drained = buffer.isEmpty
+            #expect(drained)
+        }
+        let (outboundWriter, sink) = NIOAsyncChannelOutboundWriter<HTTPResponsePart>.makeTestingWriter()
+        let state = NIOHTTPServer.ResponseSender.WriterState()
+        try await send(NIOHTTPServer.ResponseSender(writer: outboundWriter, writerState: state))
+        #expect(state.wrapped.withLock { $0.finishedWriting })
+        var iterator = sink.makeAsyncIterator()
+        #expect(await iterator.next() == .head(.init(status: .ok)))
+        #expect(await iterator.next() == .body(ByteBuffer(bytes: [1, 2, 3])))
+        #expect(await iterator.next() == .end(nil))
+    }
+
+    @Test("Buffered response rejects informational status")
+    @available(anyAppleOS 27.0, *)
+    func testBufferedResponseStatusPrecondition() async throws {
+        await #expect(processExitsWith: .failure) {
+            let (writer, _) = NIOAsyncChannelOutboundWriter<HTTPResponsePart>.makeTestingWriter()
+            let sender = NIOHTTPServer.ResponseSender(writer: writer, writerState: .init())
+            var buffer = UniqueArray<UInt8>()
+            try await sender.sendAndFinish(.init(status: .continue), buffer: &buffer)
+        }
     }
 }

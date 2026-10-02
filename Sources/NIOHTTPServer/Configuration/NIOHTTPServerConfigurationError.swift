@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 /// A configuration error arising from an invalid ``NIOHTTPServerConfiguration``.
-enum NIOHTTPServerConfigurationError: Error, CustomStringConvertible {
+enum NIOHTTPServerConfigurationError: Error, Equatable, CustomStringConvertible {
     case noSupportedHTTPVersionsSpecified
     case incompatibleTransportSecurity
     case noBindTargetsSpecified
@@ -23,6 +23,7 @@ enum NIOHTTPServerConfigurationError: Error, CustomStringConvertible {
     // swift-nio-quic doesn't currently support mTLS. See https://github.com/apple/swift-nio-quic/issues/5.
     case mTLSNotCurrentlySupportedOverHTTP3
     case unixDomainSocketNotSupportedOverHTTP3
+    case datagramSocketGroupCountOutOfRange(requested: Int, available: Int)
 
     var description: String {
         switch self {
@@ -49,6 +50,9 @@ enum NIOHTTPServerConfigurationError: Error, CustomStringConvertible {
 
         case .unixDomainSocketNotSupportedOverHTTP3:
             "Invalid configuration: unix domain socket bind targets are not supported over HTTP/3, which runs over QUIC/UDP."
+
+        case .datagramSocketGroupCountOutOfRange(let requested, let available):
+            "Invalid configuration: the datagram socket group asked for \(requested) sockets, but \(available) event loops are available."
         }
     }
 }

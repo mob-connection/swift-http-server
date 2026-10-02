@@ -19,7 +19,7 @@ import Testing
 
 @Suite
 struct SocketAddressTests {
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("A nil NIO address throws addressNotAvailable")
     func testNilAddressThrows() throws {
         #expect(throws: ListeningAddressError.addressNotAvailable) {
@@ -27,7 +27,7 @@ struct SocketAddressTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("An IPv4 NIO address maps to the ipv4 base")
     func testIPv4Address() throws {
         // `makeAddressResolvingHost` populates the address' `host` field the way a real bound
@@ -48,7 +48,7 @@ struct SocketAddressTests {
         #expect(address.unixDomainSocketPath == nil)
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("An IPv6 NIO address maps to the ipv6 base")
     func testIPv6Address() throws {
         let nioAddress = try NIOCore.SocketAddress.makeAddressResolvingHost("::1", port: 9090)
@@ -65,7 +65,7 @@ struct SocketAddressTests {
         #expect(address.unixDomainSocketPath == nil)
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("A unix domain socket NIO address maps to the unixDomainSocket base")
     func testUnixDomainSocketAddress() throws {
         let path = "/tmp/nio-http-server-socket-address-test.sock"

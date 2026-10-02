@@ -42,7 +42,7 @@ struct NIOHTTPServerTests {
     let clientLogger = Logger(label: "NIOHTTPServerTests.client")
     let serverLogger = Logger(label: "NIOHTTPServerTests.server")
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("Obtain the listening address correctly")
     func testListeningAddress() async throws {
         let server = NIOHTTPServer(
@@ -70,7 +70,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("Request-response", arguments: NIOHTTPServer.HTTPVersion.allCases)
     func testRequestResponse(httpVersion: NIOHTTPServer.HTTPVersion) async throws {
         let (server, clientConfiguration) = try TestHelpers.makeServerAndClientConfiguration(
@@ -122,7 +122,7 @@ struct NIOHTTPServerTests {
 
     /// HTTP/3 is absent from the arguments on purpose: it runs over QUIC/UDP, so a unix domain socket bind target is
     /// rejected when the configuration is created (see `HTTP3ConfigurationTests`).
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test(
         "Request-response over a unix domain socket",
         arguments: [NIOHTTPServer.HTTPVersion.plaintextHTTP1_1, .http1_1, .http2]
@@ -183,7 +183,7 @@ struct NIOHTTPServerTests {
         #expect(!FileManager.default.fileExists(atPath: socketPath))
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test(
         "mTLS request-response with custom verification callback returning peer certificates",
         arguments: [NIOHTTPServer.HTTPVersion.http1_1, .http2]
@@ -246,7 +246,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("Multiple informational response headers", arguments: NIOHTTPServer.HTTPVersion.allCases)
     func testMultipleInformationalResponseHeaders(httpVersion: NIOHTTPServer.HTTPVersion) async throws {
         let (server, clientConfiguration) = try TestHelpers.makeServerAndClientConfiguration(
@@ -288,7 +288,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test(
         "Client closes stream without sending end part",
         arguments: [NIOHTTPServer.HTTPVersion.http1_1, .http2]
@@ -338,7 +338,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("Bi-directional streaming", arguments: [NIOHTTPServer.HTTPVersion.http1_1, .http2])
     func testBidirectionalStreaming(httpVersion: NIOHTTPServer.HTTPVersion) async throws {
         let (server, clientConfiguration) = try TestHelpers.makeServerAndClientConfiguration(
@@ -397,7 +397,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test(
         "Multiple serial HTTP/1.1 requests on the same connection",
         arguments: [NIOHTTPServer.HTTPVersion.plaintextHTTP1_1, .http1_1]
@@ -444,7 +444,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("Multiple concurrent connections", arguments: NIOHTTPServer.HTTPVersion.allCases)
     func testMultipleConcurrentConnections(httpVersion: NIOHTTPServer.HTTPVersion) async throws {
         let (server, clientConfiguration) = try TestHelpers.makeServerAndClientConfiguration(
@@ -507,7 +507,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     #if HTTP3
     @Test("Multiple concurrent streams over single connection", arguments: [NIOHTTPServer.HTTPVersion.http2, .http3])
     #else
@@ -569,7 +569,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test(
         "Server can still process other connections despite one failing",
         arguments: [NIOHTTPServer.HTTPVersion.plaintextHTTP1_1, .http1_1, .http2]
@@ -634,7 +634,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("Bind to multiple addresses")
     func testMultipleBindAddresses() async throws {
         let server = NIOHTTPServer(
@@ -661,7 +661,7 @@ struct NIOHTTPServerTests {
         )
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("Serve requests on multiple addresses independently", arguments: NIOHTTPServer.HTTPVersion.allCases)
     func testServeOnMultipleAddresses(httpVersion: NIOHTTPServer.HTTPVersion) async throws {
         let (server, clientConfiguration) = try TestHelpers.makeServerAndClientConfiguration(
@@ -709,7 +709,7 @@ struct NIOHTTPServerTests {
     /// all bound addresses become unavailable simultaneously and ``listeningAddresses`` throws
     /// ``ListeningAddressError/serverClosed``. No subset of addresses continues serving after the server
     /// has stopped.
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test(
         "All addresses stop together and listeningAddresses throws after server stops",
         arguments: NIOHTTPServer.HTTPVersion.allCases
@@ -761,7 +761,7 @@ struct NIOHTTPServerTests {
         }
     }
 
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("Empty bind targets throws error")
     func testEmptyBindTargetsThrows() throws {
         #expect(throws: NIOHTTPServerConfigurationError.noBindTargetsSpecified) {
@@ -786,7 +786,7 @@ struct NIOHTTPServerTests {
     /// to for the verification. The port is below the typical ephemeral range used by `port: 0`
     /// allocations on Linux (32768+) and macOS (49152+), so other tests using `port: 0` cannot
     /// accidentally be assigned this port by the OS.
-    @available(anyAppleOS 26.0, *)
+    @available(anyAppleOS 27.0, *)
     @Test("Previously bound channels are closed when a later bind fails")
     func testPreviouslyBoundChannelsAreClosedOnPartialBindFailure() async throws {
         let firstPort = 30_210

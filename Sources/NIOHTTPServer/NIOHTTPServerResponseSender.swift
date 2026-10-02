@@ -16,7 +16,7 @@ import NIOCore
 import NIOHTTPTypes
 import Synchronization
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension NIOHTTPServer {
     public struct ResponseSender: HTTPResponseSender, ~Copyable {
         let writer: NIOAsyncChannelOutboundWriter<HTTPResponsePart>
@@ -66,10 +66,25 @@ extension NIOHTTPServer {
             return Writer(writer: self.writer, writerState: self.writerState)
             #endif
         }
+
+        public func sendAndFinish<Buffer>(
+            _ response: HTTPResponse,
+            buffer: inout Buffer,
+            trailer: HTTPFields?
+        ) async throws where Buffer: RangeReplaceableContainer, Buffer.Element == UInt8, Buffer: ~Copyable {
+            precondition(response.status.kind != .informational)
+            if buffer.isEmpty {
+                try await self.writer.write(contentsOf: [.head(response), .end(trailer)])
+            } else {
+                let body = ByteBuffer(draining: &buffer)
+                try await self.writer.write(contentsOf: [.head(response), .body(body), .end(trailer)])
+            }
+            self.writerState.wrapped.withLock { $0.finishedWriting = true }
+        }
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension NIOHTTPServer.ResponseSender {
     final class WriterState: Sendable {
         struct Wrapped: ~Copyable {
@@ -163,6 +178,7 @@ extension NIOHTTPServer.ResponseSender: Sendable {}
 @available(*, unavailable)
 extension NIOHTTPServer.ResponseSender.Writer: Sendable {}
 
+@available(anyAppleOS 27.0, *)
 extension ByteBuffer {
     /// Drains `buffer` into a newly allocated `ByteBuffer`.
     init<Buffer: RangeReplaceableContainer<UInt8> & ~Copyable>(

@@ -14,19 +14,19 @@
 
 import NIOCore
 import NIOHTTP1
-import NIOHTTPServer
 import NIOHTTPTypes
 import NIOHTTPTypesHTTP1
 import NIOPosix
 
 @testable import NIOHTTPServer
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension Channel {
-    /// Adds HTTP/1.1 client handlers to the pipeline.
+    /// Adds HTTP/1.1 client handlers to the pipeline, then calls `additionalConnectionChannelInitializer` if provided.
     func configureTestHTTP1ClientPipeline(
         responseLeftOverBytesStrategy: RemoveAfterUpgradeStrategy = .dropBytes,
-        informationalResponseStrategy: NIOInformationalResponseStrategy = .forward
+        informationalResponseStrategy: NIOInformationalResponseStrategy = .forward,
+        additionalConnectionChannelInitializer: (@Sendable (any Channel) throws -> Void)? = nil
     ) -> EventLoopFuture<NIOAsyncChannel<HTTPResponsePart, HTTPRequestPart>> {
         self.eventLoop.makeCompletedFuture {
             let handlers: [ChannelHandler] = [
@@ -41,6 +41,7 @@ extension Channel {
                 HTTP1ToHTTPClientCodec(),
             ]
             try self.pipeline.syncOperations.addHandlers(handlers)
+            try additionalConnectionChannelInitializer?(self)
 
             return try NIOAsyncChannel<HTTPResponsePart, HTTPRequestPart>(
                 wrappingChannelSynchronously: self,
@@ -50,14 +51,15 @@ extension Channel {
     }
 }
 
-@available(anyAppleOS 26.0, *)
+@available(anyAppleOS 27.0, *)
 extension ClientBootstrap {
     /// Connects to the provided `serverAddress` over plaintext HTTP/1.1 and returns a ``TestClientConnection``
     /// wrapping the established connection. Use ``TestClientConnection/makeRequestChannel()`` to obtain a
     /// `NIOAsyncChannel` for writing `HTTPRequestPart`s to the server and observing `HTTPResponsePart`s from its
     /// inbound stream.
     func connectToTestHTTP1Server(
-        at serverAddress: NIOHTTPServer.SocketAddress
+        at serverAddress: NIOHTTPServer.SocketAddress,
+        additionalConnectionChannelInitializer: (@Sendable (any Channel) throws -> Void)? = nil
     ) async throws -> TestClientConnection {
         let target: NIOCore.SocketAddress
 
@@ -73,7 +75,9 @@ extension ClientBootstrap {
         return .init(
             connectionProtocol: .http1(
                 connectionChannel: try await self.connect(to: target) { channel in
-                    channel.configureTestHTTP1ClientPipeline()
+                    channel.configureTestHTTP1ClientPipeline(
+                        additionalConnectionChannelInitializer: additionalConnectionChannelInitializer
+                    )
                 }
             )
         )
