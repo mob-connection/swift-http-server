@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 import NIOCore
-import System
+import SystemPackage
 
 @available(anyAppleOS 27.0, *)
 extension NIOHTTPServer {

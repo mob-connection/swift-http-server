@@ -14,7 +14,7 @@
 
 import NIOCore
 import NIOSSL
-public import System
+public import SystemPackage
 public import X509
 
 #if HTTP3
@@ -305,11 +305,18 @@ public struct NIOHTTPServerConfiguration: Sendable {
 
     /// Network binding configuration specifying all addresses where the server should listen.
     ///
-    /// - Precondition: Must not be empty.
+    /// - Precondition: Must not be empty, and must not contain a unix domain socket target when
+    ///   ``supportedHTTPVersions`` contains `.http3`.
     public var bindTargets: [BindTarget] {
         didSet {
             if self.bindTargets.isEmpty {
                 preconditionFailure(NIOHTTPServerConfigurationError.noBindTargetsSpecified.description)
+            }
+
+            do {
+                try self.validateBindTargets()
+            } catch {
+                preconditionFailure("\(error)")
             }
         }
     }
@@ -340,6 +347,7 @@ public struct NIOHTTPServerConfiguration: Sendable {
     ///   - When `supportedHTTPVersions` contains `.http2` and `.http3`, TLS credentials must be provided as PEM files
     ///     on disk. Other credential sources are not supported.
     ///   - `transportSecurity` can only be set to `.plaintext` when `supportedHTTPVersions == [.http1_1]`.
+    ///   - `.http3` cannot be added while ``bindTargets`` contains a unix domain socket target.
     public var supportedHTTPVersions: Set<HTTPVersion> {
         didSet {
             if self.supportedHTTPVersions.isEmpty {
@@ -347,6 +355,7 @@ public struct NIOHTTPServerConfiguration: Sendable {
             }
 
             do {
+                try self.validateBindTargets()
                 try self.validateTransportConfiguration()
             } catch {
                 preconditionFailure("\(error)")
@@ -420,17 +429,6 @@ public struct NIOHTTPServerConfiguration: Sendable {
             throw NIOHTTPServerConfigurationError.noSupportedHTTPVersionsSpecified
         }
 
-        #if HTTP3
-        // HTTP/3 runs over QUIC/UDP and cannot be served over a unix domain socket.
-        if supportedHTTPVersions.http3ConfigIfSupported != nil {
-            for bindTarget in bindTargets {
-                if case .unixDomainSocket = bindTarget.backing {
-                    throw NIOHTTPServerConfigurationError.unixDomainSocketNotSupportedOverHTTP3
-                }
-            }
-        }
-        #endif
-
         self.bindTargets = bindTargets
         self.supportedHTTPVersions = supportedHTTPVersions
         self.transportSecurity = transportSecurity
@@ -438,6 +436,8 @@ public struct NIOHTTPServerConfiguration: Sendable {
         self.maxConnections = nil
         self.connectionTimeouts = .defaults
         self.gracefulShutdown = .defaults
+
+        try self.validateBindTargets()
 
         // Validate the compatibility of `supportedHTTPVersions` and `transportSecurity`.
         try self.validateTransportConfiguration()

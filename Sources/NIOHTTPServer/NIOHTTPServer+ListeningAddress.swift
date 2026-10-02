@@ -15,7 +15,7 @@
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
-import System
+import SystemPackage
 
 enum ListeningAddressError: CustomStringConvertible, Error {
     case addressNotAvailable

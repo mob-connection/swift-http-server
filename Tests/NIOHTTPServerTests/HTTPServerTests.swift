@@ -16,7 +16,7 @@ import BasicContainers
 import Foundation
 import Logging
 import NIOHTTPServer
-import System
+import SystemPackage
 import Testing
 
 @Suite

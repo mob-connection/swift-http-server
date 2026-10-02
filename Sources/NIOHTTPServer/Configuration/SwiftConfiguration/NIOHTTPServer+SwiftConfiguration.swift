@@ -19,7 +19,7 @@ import NIOCertificateReloading
 import NIOHTTP2
 import SwiftASN1
 public import X509
-import System
+import SystemPackage
 
 @available(anyAppleOS 27.0, *)
 extension NIOHTTPServerConfiguration {
