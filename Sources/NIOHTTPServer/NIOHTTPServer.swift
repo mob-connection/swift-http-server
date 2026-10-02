@@ -608,7 +608,7 @@ extension NIOHTTPServer {
         from iterator: inout sending AsyncThrowingStream<NIOCore.SocketAddress, any Error>.AsyncIterator
     ) async throws -> NIOCore.SocketAddress {
         guard let address = try await iterator.next() else {
-            throw ListeningAddressError.addressNotAvailable
+            throw ListeningAddressError.addressOrPortNotAvailable
         }
         return address
     }
@@ -648,8 +648,8 @@ extension NIOHTTPServer {
                 }
 
                 guard let localAddress = serverChannel.channel.localAddress else {
-                    addressContinuation.finish(throwing: ListeningAddressError.addressNotAvailable)
-                    throw ListeningAddressError.addressNotAvailable
+                    addressContinuation.finish(throwing: ListeningAddressError.addressOrPortNotAvailable)
+                    throw ListeningAddressError.addressOrPortNotAvailable
                 }
 
                 addressContinuation.yield(localAddress)

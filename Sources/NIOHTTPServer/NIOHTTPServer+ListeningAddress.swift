@@ -15,26 +15,22 @@
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOPosix
-import SystemPackage
 
 enum ListeningAddressError: CustomStringConvertible, Error {
-    case addressNotAvailable
-    case portNotAvailable
-    case serverClosed
+    case addressOrPortNotAvailable
     case pathnameNotAvailable
+    case serverClosed
 
     var description: String {
         switch self {
-        case .addressNotAvailable:
-            return "Unable to retrieve the bound address from the underlying socket"
-        case .portNotAvailable:
-            return "Unable to retrieve the bound port from the underlying socket"
+        case .addressOrPortNotAvailable:
+            return "Unable to retrieve the bound address or port from the underlying socket"
+        case .pathnameNotAvailable:
+            return "Unable to retrieve the unix domain socket path from the underlying socket"
         case .serverClosed:
             return """
                 There is no listening address bound for this server: there may have been an error which caused the server to close, or it may have shut down.
                 """
-        case .pathnameNotAvailable:
-            return "Unable to retrieve the unix domain socket path from the underlying socket"
         }
     }
 }
@@ -138,76 +134,21 @@ extension NIOHTTPServer {
 @available(anyAppleOS 27.0, *)
 extension NIOHTTPServer.SocketAddress {
     init(_ address: NIOCore.SocketAddress?) throws(ListeningAddressError) {
-        guard let address else {
-            throw .addressNotAvailable
-        }
-
-        var port: Int {
-            get throws(ListeningAddressError) {
-                guard let port = address.port else {
-                    throw .portNotAvailable
-                }
-                return port
-            }
-        }
-
-        var pathname: String {
-            get throws(ListeningAddressError) {
-                guard let pathname = address.pathname else {
-                    throw .pathnameNotAvailable
-                }
-                return pathname
-            }
-        }
-
         switch address {
         case .v4(let ipv4Address):
-            try self.init(base: .ipv4(.init(host: ipv4Address.host, port: port)))
+            guard let port = address?.port else { throw .addressOrPortNotAvailable }
+            self.init(base: .ipv4(.init(host: ipv4Address.host, port: port)))
 
         case .v6(let ipv6Address):
-            try self.init(base: .ipv6(.init(host: ipv6Address.host, port: port)))
+            guard let port = address?.port else { throw .addressOrPortNotAvailable }
+            self.init(base: .ipv6(.init(host: ipv6Address.host, port: port)))
 
-        case .unixDomainSocket(_):
-            try self.init(base: .unixDomainSocket(path: pathname))
-        }
-    }
-}
+        case .unixDomainSocket:
+            guard let pathname = address?.pathname else { throw .pathnameNotAvailable }
+            self.init(base: .unixDomainSocket(path: pathname))
 
-@available(anyAppleOS 27.0, *)
-extension NIOHTTPServerConfiguration.BindTarget {
-    init(_ address: NIOCore.SocketAddress?) throws(ListeningAddressError) {
-        guard let address else {
-            throw .addressNotAvailable
-        }
-
-        var port: Int {
-            get throws(ListeningAddressError) {
-                guard let port = address.port else {
-                    throw .portNotAvailable
-                }
-                return port
-            }
-        }
-
-        var filePath: FilePath {
-            get throws(ListeningAddressError) {
-                guard let pathname = address.pathname else {
-                    throw .pathnameNotAvailable
-                }
-                let filePath = FilePath(pathname)
-                return filePath
-            }
-        }
-
-        switch address {
-        case .v4(let ipv4Address):
-            try self.init(backing: .hostAndPort(host: ipv4Address.host, port: port))
-
-        case .v6(let ipv6Address):
-            try self.init(backing: .hostAndPort(host: ipv6Address.host, port: port))
-
-        case .unixDomainSocket(_):
-            try self.init(backing: .unixDomainSocket(path: filePath))
+        case nil:
+            throw .addressOrPortNotAvailable
         }
     }
 }

@@ -29,7 +29,7 @@ import NIOQUIC
 public struct NIOHTTPServerConfiguration: Sendable {
     /// Specifies where the server should bind and listen for incoming connections.
     ///
-    /// Currently supports binding to a specific host and port combination.
+    /// Supports binding to a host and port combination, or to a unix domain socket path.
     /// Additional binding targets may be added in the future.
     public struct BindTarget: Sendable {
         enum Backing {

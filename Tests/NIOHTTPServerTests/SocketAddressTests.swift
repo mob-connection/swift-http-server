@@ -20,9 +20,9 @@ import Testing
 @Suite
 struct SocketAddressTests {
     @available(anyAppleOS 27.0, *)
-    @Test("A nil NIO address throws addressNotAvailable")
+    @Test("A nil NIO address throws addressOrPortNotAvailable")
     func testNilAddressThrows() throws {
-        #expect(throws: ListeningAddressError.addressNotAvailable) {
+        #expect(throws: ListeningAddressError.addressOrPortNotAvailable) {
             _ = try NIOHTTPServer.SocketAddress(nil as NIOCore.SocketAddress?)
         }
     }

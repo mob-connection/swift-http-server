@@ -15,7 +15,9 @@
 import BasicContainers
 import Foundation
 import Logging
+import NIOCore
 import NIOHTTPServer
+import NIOPosix
 import SystemPackage
 import Testing
 
@@ -105,31 +107,37 @@ struct HTTPServerTests {
         #expect(!FileManager.default.fileExists(atPath: socketPath))
     }
 
-    @Test("Bind fails when the unix domain socket path is already occupied")
+    @Test("Bind fails when the unix domain socket path is already occupied", .timeLimit(.minutes(1)))
     @available(anyAppleOS 27.0, *)
     func testUnixDomainSocketBindFailsWhenPathExists() async throws {
         let socketPath = "/tmp/nio-http-server-uds-\(UUID().uuidString).sock"
-        // Simulate a leftover/occupied socket by pre-creating a file at the path.
-        #expect(FileManager.default.createFile(atPath: socketPath, contents: nil))
         defer { try? FileManager.default.removeItem(atPath: socketPath) }
-        let filePath = FilePath(socketPath)
+
+        // Occupy the path with a live unix domain socket listener. A socket, unlike a regular file, is what a cleanup
+        // of existing socket files would remove, so this also guards against the bind ever taking the path over.
+        let occupyingChannel = try await ServerBootstrap(group: .singletonMultiThreadedEventLoopGroup)
+            .bind(unixDomainSocketPath: socketPath)
+            .get()
 
         let server = NIOHTTPServer(
             logger: Logger(label: "Test"),
             configuration: try .init(
-                bindTarget: .unixDomainSocket(path: filePath),
+                bindTarget: .unixDomainSocket(path: FilePath(socketPath)),
                 supportedHTTPVersions: [.http1_1],
                 transportSecurity: .plaintext
             )
         )
 
-        // Binding to an occupied path must fail rather than silently reusing or removing the file.
-        await #expect(throws: Error.self) {
+        // Binding to an occupied path must fail with EADDRINUSE rather than reusing or removing the socket.
+        let error = await #expect(throws: IOError.self) {
             try await server.serve { _, _, _, _ in }
         }
+        #expect(error?.errnoCode == EADDRINUSE)
 
-        // The pre-existing file must be left untouched: the bind never succeeded, so there is no socket of ours to
+        // The occupying socket must be left untouched: the bind never succeeded, so there is no socket of ours to
         // close, and nothing removes a path this server did not bind.
         #expect(FileManager.default.fileExists(atPath: socketPath))
+
+        try await occupyingChannel.close()
     }
 }

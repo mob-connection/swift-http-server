@@ -292,8 +292,8 @@ extension NIOHTTPServer {
                 }
 
                 guard let localAddress = quicChannel.localAddress else {
-                    addressContinuation.finish(throwing: ListeningAddressError.addressNotAvailable)
-                    throw ListeningAddressError.addressNotAvailable
+                    addressContinuation.finish(throwing: ListeningAddressError.addressOrPortNotAvailable)
+                    throw ListeningAddressError.addressOrPortNotAvailable
                 }
 
                 // A socket does not join its real reuseport group until it is bound, so this comes after the bind.

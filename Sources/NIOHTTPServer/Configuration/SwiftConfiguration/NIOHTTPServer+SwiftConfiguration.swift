@@ -30,12 +30,12 @@ extension NIOHTTPServerConfiguration {
     /// ``NIOHTTPServerConfiguration`` is comprised of four types. Provide configuration for each type under the
     /// specified key:
     ///
-    /// - **`"bindTarget"`**: A single address and port to bind to (see ``BindTarget/init(config:)``). Use this when
-    ///   binding to exactly one address.
+    /// - **`"bindTarget"`**: A single host and port, or a single unix domain socket path, to bind to (see
+    ///   ``BindTarget/init(config:)``). Use this when binding to exactly one address.
     ///
     /// - **`"bindTargets"`**: Multiple addresses to bind to, provided as parallel string and int arrays under
-    ///   `bindTargets.hosts` and `bindTargets.ports`. Exactly one of `"bindTarget"` or `"bindTargets"` must be
-    ///   provided.
+    ///   `bindTargets.hosts` and `bindTargets.ports`. Unix domain sockets are not supported here; use `"bindTarget"`
+    ///   for a socket path. Exactly one of `"bindTarget"` or `"bindTargets"` must be provided.
     ///
     /// - **`"http"`**: Supported HTTP versions and per-version settings:
     ///   - `"versions"` (required string array): the HTTP versions to support (permitted values: `"http1_1"`,
@@ -71,6 +71,8 @@ extension NIOHTTPServerConfiguration {
     ///       `"bindTarget"` and `"bindTargets"` are provided.
     ///     - Throws `NIOHTTPServerSwiftConfigurationError/bindTargetsHostsAndPortsLengthMismatch` if
     ///       `bindTargets.hosts` and `bindTargets.ports` have different lengths.
+    ///     - Throws `NIOHTTPServerSwiftConfigurationError/hostPortAndSocketPathProvided` if `bindTarget.socketPath`
+    ///       is provided together with `bindTarget.host` or `bindTarget.port`.
     public init(
         config: ConfigReader,
         customCertificateVerificationCallback: (
@@ -136,14 +138,20 @@ extension NIOHTTPServerConfiguration.BindTarget {
     /// - `socketPath` (string): A unix domain socket path to bind to. Mutually exclusive with `host`/`port`.
     ///
     /// - Parameter config: The configuration reader.
+    /// - Throws: `NIOHTTPServerSwiftConfigurationError/hostPortAndSocketPathProvided` if `socketPath` is provided
+    ///   together with `host` or `port`, even when that `host` or `port` is not a valid value.
     public init(config: ConfigSnapshotReader) throws {
-        let host = config.string(forKey: "host")
-        let port = config.int(forKey: "port")
         let socketPath = config.string(forKey: "socketPath")
 
         let backing: Backing
         if let socketPath {
-            guard host == nil, port == nil else {
+            // `int(forKey:)` reads a port that is not a valid integer (e.g. `"http"`) as absent, so also read it as a
+            // string: a malformed host or port still conflicts with `socketPath` instead of being silently ignored.
+            let hasHostOrPort =
+                config.string(forKey: "host") != nil
+                || config.int(forKey: "port") != nil
+                || config.string(forKey: "port") != nil
+            guard !hasHostOrPort else {
                 throw NIOHTTPServerSwiftConfigurationError.hostPortAndSocketPathProvided
             }
             let filePath = FilePath(socketPath)
